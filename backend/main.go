@@ -68,6 +68,35 @@ func main() {
 		api.POST("/geofences", handlers.CreateGeofence)
 		api.PUT("/geofences/:id", handlers.UpdateGeofence)
 		api.DELETE("/geofences/:id", handlers.DeleteGeofence)
+
+		// Workers CRUD
+		api.GET("/workers", handlers.GetWorkers)
+		api.POST("/workers", handlers.CreateWorker)
+		api.PUT("/workers/:id", handlers.UpdateWorker)
+		api.DELETE("/workers/:id", handlers.DeleteWorker)
+
+		// Users CRUD
+		api.GET("/users", handlers.GetUsers)
+		api.POST("/users", handlers.CreateUser)
+		api.DELETE("/users/:id", handlers.DeleteUser)
+
+		// Assignments CRUD
+		api.GET("/assignments", handlers.GetAssignments)
+		api.POST("/assignments", handlers.CreateAssignment)
+		api.DELETE("/assignments/:id", handlers.DeleteAssignment)
+
+		// Attendance CRUD
+		api.GET("/attendance", handlers.GetAttendance)
+		api.POST("/attendance", handlers.CreateAttendance)
+		api.PUT("/attendance/:id", handlers.UpdateAttendance)
+
+		// Tamper Alerts
+		api.GET("/alerts", handlers.GetAlerts)
+		api.POST("/alerts", handlers.CreateAlert)
+
+		// Heartbeats
+		api.GET("/heartbeats", handlers.GetHeartbeats)
+		api.POST("/heartbeats", handlers.CreateHeartbeatLog)
 	}
 
 	port := os.Getenv("PORT")

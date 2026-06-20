@@ -46,6 +46,7 @@ class _DashboardViewState extends State<DashboardView> {
   final MapController _dashboardMapController = MapController();
   String _selectedDepartmentFilter = 'All';
   MapStyle _dashboardMapStyle = MapStyle.satellite;
+  bool _hasCenteredOnPcLocation = false;
 
   final List<String> _tabs = [
     'Dashboard',
@@ -57,6 +58,7 @@ class _DashboardViewState extends State<DashboardView> {
     'Reports',
     'Schedule',
     'Checklists',
+    'Users',
     'Settings',
     'Profile',
   ];
@@ -119,6 +121,9 @@ class _DashboardViewState extends State<DashboardView> {
             child: ListView.builder(
               itemCount: _tabs.length,
               itemBuilder: (context, index) {
+                if (_tabs[index] == 'Users' && state.activeRoleId != 'Admin') {
+                  return const SizedBox.shrink();
+                }
                 bool isActive = _activeTab == index;
                 IconData icon;
                 switch (index) {
@@ -131,8 +136,9 @@ class _DashboardViewState extends State<DashboardView> {
                   case 6: icon = Icons.bar_chart_outlined; break;
                   case 7: icon = Icons.calendar_month_outlined; break;
                   case 8: icon = Icons.checklist_outlined; break;
-                  case 9: icon = Icons.settings_outlined; break;
-                  case 10: icon = Icons.person_outline; break;
+                  case 9: icon = Icons.supervisor_account_outlined; break;
+                  case 10: icon = Icons.settings_outlined; break;
+                  case 11: icon = Icons.person_outline; break;
                   default: icon = Icons.circle;
                 }
                 return ListTile(
@@ -262,6 +268,7 @@ class _DashboardViewState extends State<DashboardView> {
       case 5: return _buildReports(context, state); // Attendance
       case 6: return _buildReports(context, state); // Reports
       case 7: return _buildAdvancedScheduler(context, state); // Schedule
+      case 9: return _buildUserManagement(context, state); // Users
       default: return _buildPlaceholderTab(_tabs[_activeTab]);
     }
   }
@@ -691,32 +698,13 @@ class _DashboardViewState extends State<DashboardView> {
     for (final entry in mapSvc.workerLocations.entries) {
       final loc = entry.value;
       if (!filteredWorkers.any((w) => w.id == loc.workerId)) continue;
+      if (!loc.isOnline) continue;
       markers.add(Marker(
         point: LatLng(loc.lat, loc.lng),
         width: 60,
         height: 60,
         child: _buildDashboardWorkerMarker(loc),
       ));
-    }
-
-    for (final worker in filteredWorkers) {
-      if (!mapSvc.workerLocations.containsKey(worker.id)) {
-        final hb = state.heartbeatLogs
-            .lastWhere((h) => h.workerId == worker.id,
-                orElse: () => HeartbeatLog(
-                      id: '',
-                      workerId: worker.id,
-                      timestamp: DateTime.now(),
-                      latitude: 25.2048 + (state.workers.indexOf(worker) * 0.005),
-                      longitude: 55.2708,
-                    ));
-        markers.add(Marker(
-          point: LatLng(hb.latitude, hb.longitude),
-          width: 50,
-          height: 50,
-          child: _buildDashboardOfflineMarker(worker.name),
-        ));
-      }
     }
 
     if (state.hasRealLocation) {
@@ -763,18 +751,46 @@ class _DashboardViewState extends State<DashboardView> {
       );
     }
 
-    return FlutterMap(
-      mapController: _dashboardMapController,
-      options: MapOptions(
-        initialCenter: LatLng(state.currentLat, state.currentLng),
-        initialZoom: 12,
-        maxZoom: 22,
-      ),
+    // Center on PC location once a real position is acquired
+    if (state.hasRealLocation && !_hasCenteredOnPcLocation) {
+      _hasCenteredOnPcLocation = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _dashboardMapController.move(LatLng(state.currentLat, state.currentLng), 12);
+      });
+    }
+
+    return Stack(
       children: [
-        tileLayer,
-        if (polygons.isNotEmpty) PolygonLayer(polygons: polygons),
-        if (circles.isNotEmpty) CircleLayer(circles: circles),
-        if (markers.isNotEmpty) MarkerLayer(markers: markers),
+        FlutterMap(
+          mapController: _dashboardMapController,
+          options: MapOptions(
+            initialCenter: LatLng(state.currentLat, state.currentLng),
+            initialZoom: 12,
+            maxZoom: 22,
+          ),
+          children: [
+            tileLayer,
+            if (polygons.isNotEmpty) PolygonLayer(polygons: polygons),
+            if (circles.isNotEmpty) CircleLayer(circles: circles),
+            if (markers.isNotEmpty) MarkerLayer(markers: markers),
+          ],
+        ),
+        Positioned(
+          bottom: 16,
+          right: 16,
+          child: Tooltip(
+            message: 'Center on my location',
+            child: FloatingActionButton.small(
+              heroTag: 'dashboard_recenter_fab',
+              backgroundColor: Colors.tealAccent,
+              foregroundColor: Colors.black,
+              onPressed: () {
+                _dashboardMapController.move(LatLng(state.currentLat, state.currentLng), 12);
+              },
+              child: const Icon(Icons.my_location, size: 16),
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -1403,7 +1419,7 @@ class _DashboardViewState extends State<DashboardView> {
     final deptController = TextEditingController(text: "Operations");
     final desController = TextEditingController(text: "Technician");
     final userController = TextEditingController();
-    final passController = TextEditingController(text: "password123");
+    final passController = TextEditingController();
     final emiratesController = TextEditingController();
     final passportController = TextEditingController();
     final labourController = TextEditingController();
@@ -1475,6 +1491,12 @@ class _DashboardViewState extends State<DashboardView> {
                       controller: userController,
                       style: const TextStyle(color: Colors.white),
                       decoration: const InputDecoration(labelText: 'Username', labelStyle: TextStyle(color: Colors.grey)),
+                    ),
+                    TextField(
+                      controller: passController,
+                      obscureText: true,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(labelText: 'Password', labelStyle: TextStyle(color: Colors.grey)),
                     ),
                     TextField(
                       controller: emiratesController,
@@ -2209,6 +2231,262 @@ class _DashboardViewState extends State<DashboardView> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildUserManagement(BuildContext context, TrackerState state) {
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header Row
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'System Users & Roles',
+                    style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Manage supervisor, engineer, and administrator profiles.',
+                    style: TextStyle(color: Colors.grey[400], fontSize: 13),
+                  ),
+                ],
+              ),
+              ElevatedButton.icon(
+                onPressed: () => _showAddUserDialog(context, state),
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Add User Profile'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.tealAccent,
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          // User Grid / List
+          Expanded(
+            child: state.dbUsers.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.people_outline, size: 48, color: Colors.grey[600]),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'No dynamic user profiles found.',
+                          style: TextStyle(color: Colors.grey, fontSize: 14, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Click "Add User Profile" to create a new Supervisor or Engineer.',
+                          style: TextStyle(color: Colors.grey, fontSize: 11),
+                        ),
+                      ],
+                    ),
+                  )
+                : SingleChildScrollView(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1E1E26),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFF2D2D38)),
+                      ),
+                      child: Table(
+                        columnWidths: const {
+                          0: FlexColumnWidth(2),
+                          1: FlexColumnWidth(2),
+                          2: FlexColumnWidth(2),
+                          3: FlexColumnWidth(1.5),
+                          4: IntrinsicColumnWidth(),
+                        },
+                        children: [
+                          TableRow(
+                            decoration: const BoxDecoration(
+                              color: Color(0xFF13131A),
+                              borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+                            ),
+                            children: [
+                              _buildTableHeaderCell('Name'),
+                              _buildTableHeaderCell('Username'),
+                              _buildTableHeaderCell('Password'),
+                              _buildTableHeaderCell('Role'),
+                              _buildTableHeaderCell('Action'),
+                            ],
+                          ),
+                          ...state.dbUsers.map((user) {
+                            return TableRow(
+                              decoration: const BoxDecoration(
+                                border: Border(bottom: BorderSide(color: Color(0xFF2D2D38))),
+                              ),
+                              children: [
+                                _buildTableCell(user.name),
+                                _buildTableCell(user.username),
+                                _buildTableCell(user.password),
+                                _buildTableCell(user.role),
+                                Padding(
+                                  padding: const EdgeInsets.all(8.0),
+                                  child: IconButton(
+                                    icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 18),
+                                    onPressed: () {
+                                      if (user.username == 'admin') {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(content: Text('Default admin user cannot be deleted.')),
+                                        );
+                                      } else {
+                                        _showDeleteUserConfirmation(context, state, user);
+                                      }
+                                    },
+                                  ),
+                                ),
+                              ],
+                            );
+                          }).toList(),
+                        ],
+                      ),
+                    ),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTableHeaderCell(String text) {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Text(
+        text,
+        style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 13),
+      ),
+    );
+  }
+
+  Widget _buildTableCell(String text) {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Text(
+        text,
+        style: const TextStyle(color: Colors.white, fontSize: 13),
+      ),
+    );
+  }
+
+  void _showAddUserDialog(BuildContext context, TrackerState state) {
+    final nameController = TextEditingController();
+    final userController = TextEditingController();
+    final passController = TextEditingController();
+    String selectedRole = 'Supervisor';
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF1E1E26),
+              title: const Text('Add User Profile', style: TextStyle(color: Colors.white)),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: nameController,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(labelText: 'Full Name', labelStyle: TextStyle(color: Colors.grey)),
+                    ),
+                    TextField(
+                      controller: userController,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(labelText: 'Username', labelStyle: TextStyle(color: Colors.grey)),
+                    ),
+                    TextField(
+                      controller: passController,
+                      obscureText: true,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(labelText: 'Password', labelStyle: TextStyle(color: Colors.grey)),
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        const Text('Role: ', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                        DropdownButton<String>(
+                          value: selectedRole,
+                          dropdownColor: const Color(0xFF1E1E26),
+                          style: const TextStyle(color: Colors.white),
+                          onChanged: (val) => setDialogState(() => selectedRole = val!),
+                          items: ['Admin', 'Engineer', 'Supervisor']
+                              .map((role) => DropdownMenuItem(value: role, child: Text(role)))
+                              .toList(),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    if (nameController.text.isEmpty || userController.text.isEmpty || passController.text.isEmpty) {
+                      return;
+                    }
+                    state.addUser(User(
+                      id: 'user_${DateTime.now().millisecondsSinceEpoch}',
+                      name: nameController.text,
+                      username: userController.text,
+                      password: passController.text,
+                      role: selectedRole,
+                      createdAt: DateTime.now(),
+                    ));
+                    Navigator.pop(context);
+                  },
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.tealAccent, foregroundColor: Colors.black),
+                  child: const Text('Create'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showDeleteUserConfirmation(BuildContext context, TrackerState state, User user) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1E1E26),
+          title: const Text('Delete User Profile', style: TextStyle(color: Colors.white)),
+          content: Text('Are you sure you want to delete user "${user.name}"? This action cannot be undone.', style: const TextStyle(color: Colors.grey)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                state.deleteUser(user.id);
+                Navigator.pop(context);
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
     );
   }
 }

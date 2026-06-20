@@ -269,12 +269,10 @@ class _LoginViewState extends State<LoginView> {
                   child: const Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('DEMO LOGIN CREDENTIALS:', style: TextStyle(color: Colors.tealAccent, fontSize: 9, fontWeight: FontWeight.bold)),
+                      Text('LOGIN INFORMATION:', style: TextStyle(color: Colors.tealAccent, fontSize: 9, fontWeight: FontWeight.bold)),
                       SizedBox(height: 6),
                       Text('• Admin: admin / admin', style: TextStyle(color: Colors.grey, fontSize: 10)),
-                      Text('• Engineer: engineer / engineer', style: TextStyle(color: Colors.grey, fontSize: 10)),
-                      Text('• Supervisor: supervisor / supervisor', style: TextStyle(color: Colors.grey, fontSize: 10)),
-                      Text('• Worker: john / password123', style: TextStyle(color: Colors.grey, fontSize: 10)),
+                      Text('• Other Roles & Workers: Created dynamically by the Admin', style: TextStyle(color: Colors.grey, fontSize: 10)),
                     ],
                   ),
                 ),
@@ -319,26 +317,32 @@ class _LoginViewState extends State<LoginView> {
       return;
     }
 
-    // Check credentials matching roles
+    // Check default credentials
     if (username == 'admin' && password == 'admin') {
       state.setActiveRole('Admin');
       widget.onLoginSuccess();
-    } else if (username == 'engineer' && password == 'engineer') {
-      state.setActiveRole('Engineer');
-      widget.onLoginSuccess();
-    } else if (username == 'supervisor' && password == 'supervisor') {
-      state.setActiveRole('Supervisor');
-      widget.onLoginSuccess();
-    } else {
-      // Check worker logins
-      final workerList = state.workers.where((w) => w.username == username && w.password == password).toList();
-      if (workerList.isNotEmpty) {
-        state.setSelectedWorker(workerList.first.id);
-        state.setActiveRole('Worker');
-        widget.onLoginSuccess();
-      } else {
-        setState(() => _errorMessage = 'Invalid username or password.');
-      }
+      return;
     }
+
+    // Check dynamically created users (Admin, Engineer, Supervisor) in database
+    final matchedUsers = state.dbUsers.where((u) => u.username == username && u.password == password).toList();
+    if (matchedUsers.isNotEmpty) {
+      final user = matchedUsers.first;
+      state.setActiveRole(user.role); // e.g. 'Admin', 'Engineer', 'Supervisor'
+      widget.onLoginSuccess();
+      return;
+    }
+
+    // Check dynamically created workers in database
+    final matchedWorkers = state.workers.where((w) => w.username == username && w.password == password).toList();
+    if (matchedWorkers.isNotEmpty) {
+      final worker = matchedWorkers.first;
+      state.setSelectedWorker(worker.id);
+      state.setActiveRole('Worker');
+      widget.onLoginSuccess();
+      return;
+    }
+
+    setState(() => _errorMessage = 'Invalid username or password.');
   }
 }

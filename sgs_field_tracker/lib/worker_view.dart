@@ -17,6 +17,8 @@ class WorkerView extends StatefulWidget {
 
 class _WorkerViewState extends State<WorkerView> {
   int _currentIndex = 0;
+  final MapController _mapController = MapController();
+  bool _hasCenteredOnWorkerLocation = false;
 
   @override
   Widget build(BuildContext context) {
@@ -372,6 +374,14 @@ class _WorkerViewState extends State<WorkerView> {
       myTrail.add(workerPos);
     }
 
+    // Center on worker location once a real position is acquired
+    if (state.hasRealLocation && !_hasCenteredOnWorkerLocation) {
+      _hasCenteredOnWorkerLocation = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _mapController.move(workerPos, 14);
+      });
+    }
+
     final circles = <CircleMarker>[];
     final polygons = <Polygon>[];
 
@@ -412,6 +422,7 @@ class _WorkerViewState extends State<WorkerView> {
                 child: Stack(
                   children: [
                     FlutterMap(
+                      mapController: _mapController,
                       options: MapOptions(
                         initialCenter: workerPos,
                         initialZoom: 14,
@@ -481,6 +492,22 @@ class _WorkerViewState extends State<WorkerView> {
                             fontSize: 10,
                             fontWeight: FontWeight.bold,
                           ),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      bottom: 12,
+                      right: 12,
+                      child: Tooltip(
+                        message: 'Center on my location',
+                        child: FloatingActionButton.small(
+                          heroTag: 'worker_recenter_fab',
+                          backgroundColor: Colors.tealAccent,
+                          foregroundColor: Colors.black,
+                          onPressed: () {
+                            _mapController.move(workerPos, 14);
+                          },
+                          child: const Icon(Icons.my_location, size: 16),
                         ),
                       ),
                     ),

@@ -19,6 +19,9 @@ class TrackerState extends ChangeNotifier {
   List<AttendanceRecord> _attendanceRecords = [];
   List<TamperAlert> _tamperAlerts = [];
   List<HeartbeatLog> _heartbeatLogs = [];
+  List<User> _dbUsers = [];
+
+  List<User> get dbUsers => _dbUsers;
 
   // Active user selections
   String _activeRoleId = 'Admin'; // Admin, Engineer, Supervisor, Worker
@@ -157,79 +160,66 @@ class TrackerState extends ChangeNotifier {
   Timer? _geofencePollTimer;
 
   TrackerState() {
-    _loadWorkersFromStorage();
-    _seedInitialData();
+    _loadCachedLocation();
+    fetchWorkersFromBackend();
+    fetchUsersFromBackend();
     fetchGeofencesFromBackend();
+    fetchAssignmentsFromBackend();
+    fetchAttendanceFromBackend();
+    fetchAlertsFromBackend();
+    fetchHeartbeatsFromBackend();
     _initializeCurrentLocation();
     _geofencePollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       fetchGeofencesFromBackend();
+      fetchWorkersFromBackend();
+      fetchUsersFromBackend();
+      fetchAssignmentsFromBackend();
+      fetchAttendanceFromBackend();
+      fetchAlertsFromBackend();
+      fetchHeartbeatsFromBackend();
     });
   }
 
-  void _loadWorkersFromStorage() {
+  void _loadCachedLocation() {
     try {
-      final jsonStr = html.window.localStorage['sgs_field_tracker_workers'];
-      if (jsonStr != null && jsonStr.isNotEmpty) {
-        final List<dynamic> list = jsonDecode(jsonStr);
-        _workers = list.map((e) => Worker.fromJson(e as Map<String, dynamic>)).toList();
-      } else {
-        _workers = [];
+      final latStr = html.window.localStorage['sgs_last_lat'];
+      final lngStr = html.window.localStorage['sgs_last_lng'];
+      if (latStr != null && lngStr != null) {
+        _currentLat = double.parse(latStr);
+        _currentLng = double.parse(lngStr);
+        _hasRealLocation = true;
+        debugPrint('[GPS] Loaded cached location: $_currentLat, $_currentLng');
       }
     } catch (e) {
-      debugPrint('Error loading workers from local storage: $e');
-      _workers = [];
+      debugPrint('[GPS] Error loading cached location: $e');
     }
-    
-    if (_workers.isNotEmpty) {
-      _selectedWorkerId = _workers.first.id;
-    } else {
-      _selectedWorkerId = 'no_workers';
+  }
+
+  void _saveCachedLocation(double lat, double lng) {
+    try {
+      html.window.localStorage['sgs_last_lat'] = lat.toString();
+      html.window.localStorage['sgs_last_lng'] = lng.toString();
+    } catch (e) {
+      debugPrint('[GPS] Error saving cached location: $e');
     }
+  }
+
+  void _loadWorkersFromStorage() {
+    // No-op, using backend database.
   }
 
   void _saveWorkersToStorage() {
-    try {
-      final jsonStr = jsonEncode(_workers.map((w) => w.toJson()).toList());
-      html.window.localStorage['sgs_field_tracker_workers'] = jsonStr;
-    } catch (e) {
-      debugPrint('Error saving workers to local storage: $e');
-    }
+    // No-op, using backend database.
   }
 
   void _seedInitialData() {
-    // 1. Seed Sites (including accommodation)
-    _sites = [];
-
-    DateTime today = DateTime(2026, 6, 17);
-    _assignments = [];
-
-    // 4. Initialize Attendance Records for Today
-    for (var worker in _workers) {
-      // Find assignments for this worker
-      var workerAssigns = _assignments.where((a) => a.workerId == worker.id && isSameDay(a.date, today)).toList();
-      
-      List<VisitRecord> visits = [];
-      for (var wa in workerAssigns) {
-        visits.add(VisitRecord(
-          siteId: wa.siteId,
-          status: 'Pending',
-          checklistAtVisit: wa.checklist.map((c) => c.copy()).toList(),
-        ));
-      }
-
-      _attendanceRecords.add(AttendanceRecord(
-        id: 'att_${worker.id}_${DateFormat('yyyyMMdd').format(today)}',
-        workerId: worker.id,
-        date: today,
-        visits: visits,
-        status: visits.isEmpty ? 'Present' : 'Absent', // default absent if has visits
-      ));
-    }
+    // No-op, using backend database.
   }
 
   // Setters & Actions
   void setActiveRole(String roleId) {
     _activeRoleId = roleId;
+    _initializeCurrentLocation();
     notifyListeners();
   }
 
@@ -244,6 +234,7 @@ class TrackerState extends ChangeNotifier {
       _connectWorkerWs();
       _startGpsTracking();
     }
+    _initializeCurrentLocation();
     notifyListeners();
   }
 
@@ -446,43 +437,94 @@ class TrackerState extends ChangeNotifier {
   }
 
   // Worker Management CRUD
-  void addWorker(Worker worker) {
-    _workers.add(worker);
-    _saveWorkersToStorage();
-    if (_selectedWorkerId == 'no_workers') {
-      _selectedWorkerId = worker.id;
-    }
-    // Initialize empty attendance record for today
-    _attendanceRecords.add(AttendanceRecord(
-      id: 'att_${worker.id}_${DateFormat('yyyyMMdd').format(_selectedDate)}',
-      workerId: worker.id,
-      date: _selectedDate,
-      visits: [],
-      status: 'Present', // present if no assigned sites
-    ));
-    notifyListeners();
-  }
-
-  void editWorker(Worker updatedWorker) {
-    int index = _workers.indexWhere((w) => w.id == updatedWorker.id);
-    if (index != -1) {
-      _workers[index] = updatedWorker;
+  Future<void> addWorker(Worker worker) async {
+    try {
+      final res = await http.post(
+        Uri.parse('http://localhost:8080/api/workers'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(worker.toJson()),
+      );
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        await fetchWorkersFromBackend();
+      }
+    } catch (e) {
+      debugPrint('[TrackerState] Add worker error: $e');
+      _workers.add(worker);
       _saveWorkersToStorage();
+      if (_selectedWorkerId == 'no_workers') {
+        _selectedWorkerId = worker.id;
+      }
       notifyListeners();
     }
   }
 
-  void deleteWorker(String workerId) {
-    _workers.removeWhere((w) => w.id == workerId);
-    _saveWorkersToStorage();
-    if (_selectedWorkerId == workerId) {
-      _selectedWorkerId = _workers.isNotEmpty ? _workers.first.id : 'no_workers';
+  Future<void> editWorker(Worker updatedWorker) async {
+    try {
+      final res = await http.put(
+        Uri.parse('http://localhost:8080/api/workers/${updatedWorker.id}'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(updatedWorker.toJson()),
+      );
+      if (res.statusCode == 200) {
+        await fetchWorkersFromBackend();
+      }
+    } catch (e) {
+      debugPrint('[TrackerState] Edit worker error: $e');
+      int index = _workers.indexWhere((w) => w.id == updatedWorker.id);
+      if (index != -1) {
+        _workers[index] = updatedWorker;
+        _saveWorkersToStorage();
+        notifyListeners();
+      }
     }
-    notifyListeners();
+  }
+
+  Future<void> deleteWorker(String workerId) async {
+    try {
+      final res = await http.delete(Uri.parse('http://localhost:8080/api/workers/$workerId'));
+      if (res.statusCode == 200) {
+        await fetchWorkersFromBackend();
+      }
+    } catch (e) {
+      debugPrint('[TrackerState] Delete worker error: $e');
+      _workers.removeWhere((w) => w.id == workerId);
+      _saveWorkersToStorage();
+      if (_selectedWorkerId == workerId) {
+        _selectedWorkerId = _workers.isNotEmpty ? _workers.first.id : 'no_workers';
+      }
+      notifyListeners();
+    }
+  }
+
+  // User Management CRUD
+  Future<void> addUser(User user) async {
+    try {
+      final res = await http.post(
+        Uri.parse('http://localhost:8080/api/users'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(user.toJson()),
+      );
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        await fetchUsersFromBackend();
+      }
+    } catch (e) {
+      debugPrint('[TrackerState] Add user error: $e');
+    }
+  }
+
+  Future<void> deleteUser(String userId) async {
+    try {
+      final res = await http.delete(Uri.parse('http://localhost:8080/api/users/$userId'));
+      if (res.statusCode == 200) {
+        await fetchUsersFromBackend();
+      }
+    } catch (e) {
+      debugPrint('[TrackerState] Delete user error: $e');
+    }
   }
 
   // Scheduling Grid
-  void assignSiteToWorker({
+  Future<void> assignSiteToWorker({
     required String workerId,
     required String siteId,
     required DateTime date,
@@ -490,38 +532,44 @@ class TrackerState extends ChangeNotifier {
     required List<ChecklistItem> checklist,
     required String priority,
     required String breakTime,
-  }) {
-    // Check if assignment already exists
+  }) async {
     int existingIndex = _assignments.indexWhere(
         (a) => a.workerId == workerId && a.siteId == siteId && isSameDay(a.date, date));
+    String assignmentId = existingIndex != -1 
+        ? _assignments[existingIndex].id 
+        : 'assign_${DateTime.now().millisecondsSinceEpoch}';
 
-    if (existingIndex != -1) {
-      _assignments[existingIndex] = Assignment(
-        id: _assignments[existingIndex].id,
-        workerId: workerId,
-        siteId: siteId,
-        date: date,
-        shift: 'Morning Shift',
-        instructions: instructions,
-        checklist: checklist,
-        priority: priority,
-        breakTime: breakTime,
+    final assignment = Assignment(
+      id: assignmentId,
+      workerId: workerId,
+      siteId: siteId,
+      date: date,
+      shift: 'Morning Shift',
+      instructions: instructions,
+      checklist: checklist,
+      priority: priority,
+      breakTime: breakTime,
+    );
+
+    try {
+      final res = await http.post(
+        Uri.parse('http://localhost:8080/api/assignments'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(assignment.toJson()),
       );
-    } else {
-      _assignments.add(Assignment(
-        id: 'assign_${DateTime.now().millisecondsSinceEpoch}',
-        workerId: workerId,
-        siteId: siteId,
-        date: date,
-        shift: 'Morning Shift',
-        instructions: instructions,
-        checklist: checklist,
-        priority: priority,
-        breakTime: breakTime,
-      ));
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        await fetchAssignmentsFromBackend();
+      }
+    } catch (e) {
+      debugPrint('[TrackerState] Assign site error: $e');
+      if (existingIndex != -1) {
+        _assignments[existingIndex] = assignment;
+      } else {
+        _assignments.add(assignment);
+      }
+      notifyListeners();
     }
 
-    // Update attendance record visits list for this worker & date
     var att = _getOrCreateAttendanceRecord(workerId, date);
     int visitIndex = att.visits.indexWhere((v) => v.siteId == siteId);
     if (visitIndex == -1) {
@@ -531,7 +579,6 @@ class TrackerState extends ChangeNotifier {
         checklistAtVisit: checklist.map((c) => c.copy()).toList(),
       ));
     } else {
-      // update checklist
       att.visits[visitIndex] = VisitRecord(
         siteId: siteId,
         status: att.visits[visitIndex].status,
@@ -544,22 +591,46 @@ class TrackerState extends ChangeNotifier {
     }
 
     _recalculateAttendanceStatus(att);
+    await saveAttendanceRecord(att);
     notifyListeners();
   }
 
-  void removeAssignment(String assignmentId) {
+  Future<void> removeAssignment(String assignmentId) async {
     int assignIndex = _assignments.indexWhere((a) => a.id == assignmentId);
     if (assignIndex != -1) {
       var assign = _assignments[assignIndex];
-      _assignments.removeAt(assignIndex);
+      try {
+        final res = await http.delete(Uri.parse('http://localhost:8080/api/assignments/$assignmentId'));
+        if (res.statusCode == 200) {
+          await fetchAssignmentsFromBackend();
+        }
+      } catch (e) {
+        debugPrint('[TrackerState] Delete assignment error: $e');
+        _assignments.removeAt(assignIndex);
+      }
 
-      // Remove visit from attendance record
       var att = _getCurrentAttendanceRecord(assign.workerId);
       if (att != null) {
         att.visits.removeWhere((v) => v.siteId == assign.siteId);
         _recalculateAttendanceStatus(att);
+        await saveAttendanceRecord(att);
       }
       notifyListeners();
+    }
+  }
+
+  Future<void> saveAttendanceRecord(AttendanceRecord att) async {
+    try {
+      final res = await http.post(
+        Uri.parse('http://localhost:8080/api/attendance'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(att.toJson()),
+      );
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        await fetchAttendanceFromBackend();
+      }
+    } catch (e) {
+      debugPrint('[TrackerState] Save attendance error: $e');
     }
   }
 
@@ -570,6 +641,7 @@ class TrackerState extends ChangeNotifier {
       var visit = att.visits.firstWhere((v) => v.siteId == siteId);
       var item = visit.checklistAtVisit.firstWhere((i) => i.id == itemId);
       item.isCompleted = !item.isCompleted;
+      saveAttendanceRecord(att);
       notifyListeners();
     }
   }
@@ -580,6 +652,7 @@ class TrackerState extends ChangeNotifier {
       var visit = att.visits.firstWhere((v) => v.siteId == siteId);
       visit.comments = comments;
       visit.photoPath = photoPath;
+      saveAttendanceRecord(att);
       notifyListeners();
     }
   }
@@ -590,7 +663,6 @@ class TrackerState extends ChangeNotifier {
     _insideGeofenceIds.add(siteId);
 
     var site = _sites.firstWhere((s) => s.id == siteId, orElse: () {
-      // Look in backend geofences
       final fence = _backendGeofences.firstWhere((g) => g.id == siteId);
       return Site(
         id: fence.id,
@@ -615,7 +687,6 @@ class TrackerState extends ChangeNotifier {
       );
     });
     
-    // Auto-start shift if entering first work geofence and shift not started
     if (!site.isAccommodation) {
       startShift(workerId);
     }
@@ -623,8 +694,6 @@ class TrackerState extends ChangeNotifier {
     var att = _getOrCreateAttendanceRecord(workerId, _simulatedTime);
 
     if (site.isAccommodation) {
-      // Morning Exit vs Evening Entry logic
-      // Accommodation entry
       var visit = att.visits.firstWhere((v) => v.siteId == siteId, orElse: () {
         var nv = VisitRecord(
           siteId: siteId,
@@ -638,7 +707,6 @@ class TrackerState extends ChangeNotifier {
       visit.entryTime = _simulatedTime;
       visit.status = 'Entry Recorded';
     } else {
-      // Work site entry
       var visit = att.visits.firstWhere((v) => v.siteId == siteId, orElse: () {
         var nv = VisitRecord(
           siteId: siteId,
@@ -652,6 +720,8 @@ class TrackerState extends ChangeNotifier {
       visit.entryTime = _simulatedTime;
       visit.status = 'Entry Recorded';
     }
+
+    saveAttendanceRecord(att);
 
     if (!_isInternetEnabled) {
       var activeVisit = att.visits.firstWhere((v) => v.siteId == siteId);
@@ -706,6 +776,8 @@ class TrackerState extends ChangeNotifier {
         visit.status = 'Completed';
       }
 
+      saveAttendanceRecord(att);
+
       if (!_isInternetEnabled) {
         _offlineVisits.add(visit.copy());
       }
@@ -722,7 +794,6 @@ class TrackerState extends ChangeNotifier {
 
   // Pending Visit Override (Supervisor / Engineer actions)
   void resolvePendingVisit(String recordId, String siteId, String action, {String? explanation}) {
-    // Action can be: 'present' (mark complete), 'ignore' (remove visit from attendance score), 'completed'
     int recordIndex = _attendanceRecords.indexWhere((r) => r.id == recordId);
     if (recordIndex != -1) {
       var record = _attendanceRecords[recordIndex];
@@ -739,13 +810,14 @@ class TrackerState extends ChangeNotifier {
           visit.comments = explanation ?? "Ignored by Supervisor";
         }
         _recalculateAttendanceStatus(record);
+        saveAttendanceRecord(record);
         notifyListeners();
       }
     }
   }
 
   // Heartbeat Logs & GPS Alerts
-  void logHeartbeat(String workerId, double lat, double lng) {
+  Future<void> logHeartbeat(String workerId, double lat, double lng) async {
     var log = HeartbeatLog(
       id: 'hb_${DateTime.now().millisecondsSinceEpoch}',
       workerId: workerId,
@@ -756,17 +828,24 @@ class TrackerState extends ChangeNotifier {
 
     if (_isInternetEnabled) {
       _heartbeatLogs.add(log);
+      try {
+        await http.post(
+          Uri.parse('http://localhost:8080/api/heartbeats'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode(log.toJson()),
+        );
+      } catch (e) {
+        debugPrint('[TrackerState] Post heartbeat error: $e');
+      }
     } else {
       _offlineHeartbeats.add(log);
     }
     
-    // Also push heartbeat to server
     _sendHeartbeatToBackend(lat, lng, 10.0);
-    
     notifyListeners();
   }
 
-  void triggerTamperAlert(String workerId, String type, String details) {
+  Future<void> triggerTamperAlert(String workerId, String type, String details) async {
     var alert = TamperAlert(
       id: 'alert_${DateTime.now().millisecondsSinceEpoch}',
       workerId: workerId,
@@ -777,6 +856,15 @@ class TrackerState extends ChangeNotifier {
 
     if (_isInternetEnabled) {
       _tamperAlerts.add(alert);
+      try {
+        await http.post(
+          Uri.parse('http://localhost:8080/api/alerts'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode(alert.toJson()),
+        );
+      } catch (e) {
+        debugPrint('[TrackerState] Post alert error: $e');
+      }
     } else {
       _offlineAlerts.add(alert);
     }
@@ -797,9 +885,6 @@ class TrackerState extends ChangeNotifier {
 
     try {
       _workerWsChannel = WebSocketChannel.connect(Uri.parse(wsUrl));
-      _isWorkerWsConnected = true;
-      _workerReconnectDelay = 2; // reset
-      notifyListeners();
 
       _workerWsChannel!.stream.listen(
         (message) {
@@ -819,7 +904,15 @@ class TrackerState extends ChangeNotifier {
         },
         cancelOnError: false,
       );
-      debugPrint('[WorkerWS] Connected successfully to $wsUrl');
+
+      _workerWsChannel!.ready.then((_) {
+        _isWorkerWsConnected = true;
+        _workerReconnectDelay = 2; // reset
+        notifyListeners();
+        debugPrint('[WorkerWS] Connected successfully to $wsUrl');
+      }).catchError((err) {
+        debugPrint('[WorkerWS] ready error: $err');
+      });
     } catch (e) {
       debugPrint('[WorkerWS] Connection failed: $e');
       _isWorkerWsConnected = false;
@@ -1174,6 +1267,87 @@ class TrackerState extends ChangeNotifier {
     }
   }
 
+  Future<void> fetchWorkersFromBackend() async {
+    try {
+      final res = await http.get(Uri.parse('http://localhost:8080/api/workers'));
+      if (res.statusCode == 200) {
+        final list = jsonDecode(res.body) as List<dynamic>;
+        _workers = list.map((e) => Worker.fromJson(e as Map<String, dynamic>)).toList();
+        if (_workers.isNotEmpty && (_selectedWorkerId == 'no_workers' || !_workers.any((w) => w.id == _selectedWorkerId))) {
+          _selectedWorkerId = _workers.first.id;
+        }
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('[TrackerState] Worker fetch error: $e');
+    }
+  }
+
+  Future<void> fetchUsersFromBackend() async {
+    try {
+      final res = await http.get(Uri.parse('http://localhost:8080/api/users'));
+      if (res.statusCode == 200) {
+        final list = jsonDecode(res.body) as List<dynamic>;
+        _dbUsers = list.map((e) => User.fromJson(e as Map<String, dynamic>)).toList();
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('[TrackerState] User fetch error: $e');
+    }
+  }
+
+  Future<void> fetchAssignmentsFromBackend() async {
+    try {
+      final res = await http.get(Uri.parse('http://localhost:8080/api/assignments'));
+      if (res.statusCode == 200) {
+        final list = jsonDecode(res.body) as List<dynamic>;
+        _assignments = list.map((e) => Assignment.fromJson(e as Map<String, dynamic>)).toList();
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('[TrackerState] Assignment fetch error: $e');
+    }
+  }
+
+  Future<void> fetchAttendanceFromBackend() async {
+    try {
+      final res = await http.get(Uri.parse('http://localhost:8080/api/attendance'));
+      if (res.statusCode == 200) {
+        final list = jsonDecode(res.body) as List<dynamic>;
+        _attendanceRecords = list.map((e) => AttendanceRecord.fromJson(e as Map<String, dynamic>)).toList();
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('[TrackerState] Attendance fetch error: $e');
+    }
+  }
+
+  Future<void> fetchAlertsFromBackend() async {
+    try {
+      final res = await http.get(Uri.parse('http://localhost:8080/api/alerts'));
+      if (res.statusCode == 200) {
+        final list = jsonDecode(res.body) as List<dynamic>;
+        _tamperAlerts = list.map((e) => TamperAlert.fromJson(e as Map<String, dynamic>)).toList();
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('[TrackerState] Alerts fetch error: $e');
+    }
+  }
+
+  Future<void> fetchHeartbeatsFromBackend() async {
+    try {
+      final res = await http.get(Uri.parse('http://localhost:8080/api/heartbeats'));
+      if (res.statusCode == 200) {
+        final list = jsonDecode(res.body) as List<dynamic>;
+        _heartbeatLogs = list.map((e) => HeartbeatLog.fromJson(e as Map<String, dynamic>)).toList();
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('[TrackerState] Heartbeats fetch error: $e');
+    }
+  }
+
   Future<void> _initializeCurrentLocation() async {
     try {
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
@@ -1196,18 +1370,31 @@ class TrackerState extends ChangeNotifier {
         return;
       }
 
+      // Check last known location first (very fast fallback)
+      Position? lastKnown = await Geolocator.getLastKnownPosition();
+      if (lastKnown != null) {
+        _currentLat = lastKnown.latitude;
+        _currentLng = lastKnown.longitude;
+        _hasRealLocation = true;
+        _saveCachedLocation(lastKnown.latitude, lastKnown.longitude);
+        notifyListeners();
+        debugPrint('[GPS] Initialized last known location: $_currentLat, $_currentLng');
+      }
+
       Position pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.medium,
         ),
-      );
+      ).timeout(const Duration(seconds: 4));
+      
       _currentLat = pos.latitude;
       _currentLng = pos.longitude;
       _hasRealLocation = true;
+      _saveCachedLocation(pos.latitude, pos.longitude);
       notifyListeners();
       debugPrint('[GPS] Initialized PC location: $_currentLat, $_currentLng');
     } catch (e) {
-      debugPrint('[GPS] Failed to get current PC location: $e');
+      debugPrint('[GPS] Failed to get current PC location or timed out: $e');
     }
   }
 

@@ -243,6 +243,24 @@ class ChecklistItem {
       isCompleted: isCompleted,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'task': task,
+      'category': category,
+      'isCompleted': isCompleted,
+    };
+  }
+
+  factory ChecklistItem.fromJson(Map<String, dynamic> json) {
+    return ChecklistItem(
+      id: json['id'] as String? ?? '',
+      task: json['task'] as String? ?? '',
+      category: json['category'] as String? ?? '',
+      isCompleted: json['isCompleted'] as bool? ?? false,
+    );
+  }
 }
 
 class Assignment {
@@ -288,6 +306,37 @@ class Assignment {
       breakTime: breakTime ?? this.breakTime,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'workerId': workerId,
+      'siteId': siteId,
+      'date': date.toIso8601String(),
+      'shift': shift,
+      'instructions': instructions,
+      'checklist': checklist.map((e) => e.toJson()).toList(),
+      'priority': priority,
+      'breakTime': breakTime,
+    };
+  }
+
+  factory Assignment.fromJson(Map<String, dynamic> json) {
+    return Assignment(
+      id: json['id'] as String? ?? '',
+      workerId: json['workerId'] as String? ?? '',
+      siteId: json['siteId'] as String? ?? '',
+      date: DateTime.parse(json['date'] as String),
+      shift: json['shift'] as String? ?? '',
+      instructions: json['instructions'] as String? ?? '',
+      checklist: (json['checklist'] as List<dynamic>?)
+              ?.map((e) => ChecklistItem.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          [],
+      priority: json['priority'] as String? ?? '',
+      breakTime: json['breakTime'] as String? ?? '',
+    );
+  }
 }
 
 class VisitRecord {
@@ -320,6 +369,33 @@ class VisitRecord {
       comments: comments,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'siteId': siteId,
+      'entryTime': entryTime?.toIso8601String(),
+      'exitTime': exitTime?.toIso8601String(),
+      'status': status,
+      'checklistAtVisit': checklistAtVisit.map((e) => e.toJson()).toList(),
+      'photoPath': photoPath,
+      'comments': comments,
+    };
+  }
+
+  factory VisitRecord.fromJson(Map<String, dynamic> json) {
+    return VisitRecord(
+      siteId: json['siteId'] as String? ?? '',
+      entryTime: json['entryTime'] != null ? DateTime.parse(json['entryTime'] as String) : null,
+      exitTime: json['exitTime'] != null ? DateTime.parse(json['exitTime'] as String) : null,
+      status: json['status'] as String? ?? 'Pending',
+      checklistAtVisit: (json['checklistAtVisit'] as List<dynamic>?)
+              ?.map((e) => ChecklistItem.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          [],
+      photoPath: json['photoPath'] as String?,
+      comments: json['comments'] as String?,
+    );
+  }
 }
 
 class AttendanceRecord {
@@ -348,6 +424,41 @@ class AttendanceRecord {
     this.supervisorComments = '',
     this.isApproved = false,
   });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'workerId': workerId,
+      'date': date.toIso8601String(),
+      'shiftStart': shiftStart?.toIso8601String(),
+      'shiftEnd': shiftEnd?.toIso8601String(),
+      'visits': visits.map((e) => e.toJson()).toList(),
+      'overtimeHours': overtimeHours,
+      'normalHours': normalHours,
+      'status': status,
+      'supervisorComments': supervisorComments,
+      'isApproved': isApproved,
+    };
+  }
+
+  factory AttendanceRecord.fromJson(Map<String, dynamic> json) {
+    return AttendanceRecord(
+      id: json['id'] as String? ?? '',
+      workerId: json['workerId'] as String? ?? '',
+      date: DateTime.parse(json['date'] as String),
+      shiftStart: json['shiftStart'] != null ? DateTime.parse(json['shiftStart'] as String) : null,
+      shiftEnd: json['shiftEnd'] != null ? DateTime.parse(json['shiftEnd'] as String) : null,
+      visits: (json['visits'] as List<dynamic>?)
+              ?.map((e) => VisitRecord.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          [],
+      overtimeHours: (json['overtimeHours'] as num?)?.toDouble() ?? 0.0,
+      normalHours: (json['normalHours'] as num?)?.toDouble() ?? 0.0,
+      status: json['status'] as String? ?? 'Absent',
+      supervisorComments: json['supervisorComments'] as String? ?? '',
+      isApproved: json['isApproved'] as bool? ?? false,
+    );
+  }
 }
 
 class TamperAlert {
@@ -364,6 +475,26 @@ class TamperAlert {
     required this.alertType,
     required this.details,
   });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'workerId': workerId,
+      'timestamp': timestamp.toIso8601String(),
+      'alertType': alertType,
+      'details': details,
+    };
+  }
+
+  factory TamperAlert.fromJson(Map<String, dynamic> json) {
+    return TamperAlert(
+      id: json['id'] as String? ?? '',
+      workerId: json['workerId'] as String? ?? '',
+      timestamp: DateTime.parse(json['timestamp'] as String),
+      alertType: json['alertType'] as String? ?? '',
+      details: json['details'] as String? ?? '',
+    );
+  }
 }
 
 class HeartbeatLog {
@@ -380,4 +511,66 @@ class HeartbeatLog {
     required this.latitude,
     required this.longitude,
   });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'workerId': workerId,
+      'timestamp': timestamp.toIso8601String(),
+      'latitude': latitude,
+      'longitude': longitude,
+    };
+  }
+
+  factory HeartbeatLog.fromJson(Map<String, dynamic> json) {
+    return HeartbeatLog(
+      id: json['id'] as String? ?? '',
+      workerId: json['workerId'] as String? ?? '',
+      timestamp: DateTime.parse(json['timestamp'] as String),
+      latitude: (json['latitude'] as num?)?.toDouble() ?? 0.0,
+      longitude: (json['longitude'] as num?)?.toDouble() ?? 0.0,
+    );
+  }
+}
+
+class User {
+  final String id;
+  final String name;
+  final String username;
+  final String password;
+  final String role; // 'Admin', 'Engineer', 'Supervisor'
+  final DateTime createdAt;
+
+  User({
+    required this.id,
+    required this.name,
+    required this.username,
+    required this.password,
+    required this.role,
+    required this.createdAt,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'username': username,
+      'password': password,
+      'role': role,
+      'createdAt': createdAt.toIso8601String(),
+    };
+  }
+
+  factory User.fromJson(Map<String, dynamic> json) {
+    return User(
+      id: json['id'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      username: json['username'] as String? ?? '',
+      password: json['password'] as String? ?? '',
+      role: json['role'] as String? ?? '',
+      createdAt: json['createdAt'] != null
+          ? DateTime.parse(json['createdAt'] as String)
+          : DateTime.now(),
+    );
+  }
 }

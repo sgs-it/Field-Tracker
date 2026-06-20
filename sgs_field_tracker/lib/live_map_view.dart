@@ -450,9 +450,10 @@ class _LiveMapViewState extends State<LiveMapView> {
   Widget _buildWorkerMarkerLayer(MapService mapSvc, TrackerState trackerState) {
     final markers = <Marker>[];
 
-    // First add markers from live MapService locations
+    // First add markers from live MapService locations if online and broadcasting
     for (final entry in mapSvc.workerLocations.entries) {
       final loc = entry.value;
+      if (!loc.isOnline) continue;
       final isSelected = _selectedWorkerId == loc.workerId;
       markers.add(Marker(
         point: LatLng(loc.lat, loc.lng),
@@ -463,30 +464,6 @@ class _LiveMapViewState extends State<LiveMapView> {
           child: _buildWorkerPin(loc, isSelected, trackerState),
         ),
       ));
-    }
-
-    // Fallback: show static pins for workers with no live location
-    for (final worker in trackerState.workers) {
-      if (!mapSvc.workerLocations.containsKey(worker.id)) {
-        final hb = trackerState.heartbeatLogs
-            .lastWhere((h) => h.workerId == worker.id,
-                orElse: () => HeartbeatLog(
-                      id: '',
-                      workerId: worker.id,
-                      timestamp: DateTime.now(),
-                      latitude: 25.2048 + (trackerState.workers.indexOf(worker) * 0.005),
-                      longitude: 55.2708,
-                    ));
-        markers.add(Marker(
-          point: LatLng(hb.latitude, hb.longitude),
-          width: 60,
-          height: 60,
-          child: GestureDetector(
-            onTap: () => _onStaticWorkerTap(worker),
-            child: _buildOfflinePin(worker),
-          ),
-        ));
-      }
     }
 
     // Add My PC Location marker (blue pulsing dot)

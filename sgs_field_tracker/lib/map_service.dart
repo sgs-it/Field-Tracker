@@ -57,12 +57,16 @@ class MapService extends ChangeNotifier {
         cancelOnError: false,
       );
 
-      _isConnected = true;
-      _reconnectDelay = 2; // reset backoff
-      _connectionStatus = 'Connected';
-      notifyListeners();
-
-      debugPrint('[MapService] WebSocket connected to $uri');
+      _channel!.ready.then((_) {
+        _isConnected = true;
+        _reconnectDelay = 2; // reset backoff
+        _connectionStatus = 'Connected';
+        notifyListeners();
+        debugPrint('[MapService] WebSocket connected successfully to $uri');
+      }).catchError((e) {
+        debugPrint('[MapService] WebSocket connection error on ready: $e');
+        // The stream listener onError/onDone callback will handle reconnecting state updates.
+      });
     } catch (e) {
       _onError(e);
     }
