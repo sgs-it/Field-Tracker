@@ -460,7 +460,7 @@ class _LiveMapViewState extends State<LiveMapView> {
         height: isSelected ? 90 : 70,
         child: GestureDetector(
           onTap: () => _onWorkerPinTap(loc, trackerState),
-          child: _buildWorkerPin(loc, isSelected),
+          child: _buildWorkerPin(loc, isSelected, trackerState),
         ),
       ));
     }
@@ -483,7 +483,7 @@ class _LiveMapViewState extends State<LiveMapView> {
           height: 60,
           child: GestureDetector(
             onTap: () => _onStaticWorkerTap(worker),
-            child: _buildOfflinePin(worker.name),
+            child: _buildOfflinePin(worker),
           ),
         ));
       }
@@ -525,7 +525,7 @@ class _LiveMapViewState extends State<LiveMapView> {
     return MarkerLayer(markers: markers);
   }
 
-  Widget _buildWorkerPin(WorkerLocation loc, bool isSelected) {
+  Widget _buildWorkerPin(WorkerLocation loc, bool isSelected, TrackerState trackerState) {
     final isOnline = loc.isOnline && loc.isRecent;
     final color = isOnline
         ? (loc.isOnShift ? const Color(0xFF00BFA5) : const Color(0xFFFFD600))
@@ -533,9 +533,42 @@ class _LiveMapViewState extends State<LiveMapView> {
 
     final initials = getInitials(loc.workerName);
     
-    final tooltipMsg = 'Name: ${loc.workerName}\n'
-        'Status: ${isOnline ? (loc.isOnShift ? "On Shift (Present)" : "Pending check-in") : "Offline/Absent"}\n'
-        'Last Active: ${DateFormat('hh:mm a').format(loc.timestamp)}';
+    // Look up worker to get Employee ID and Phone
+    final worker = trackerState.workers.firstWhere(
+      (w) => w.id == loc.workerId,
+      orElse: () => Worker(
+        id: loc.workerId,
+        employeeId: 'N/A',
+        name: loc.workerName,
+        phone: 'N/A',
+        staffType: StaffType.IP,
+        staffCategory: StaffCategory.Direct,
+        leaveCategory: LeaveCategory.Year1,
+        department: 'N/A',
+        designation: 'N/A',
+        username: '',
+        password: '',
+        staffHierarchy: '',
+        isActive: true,
+        emiratesId: '',
+        emiratesIdExpiry: DateTime.now(),
+        passportNo: '',
+        passportExpiry: DateTime.now(),
+        labourCardNo: '',
+        labourCardExpiry: DateTime.now(),
+        joinedDate: DateTime.now(),
+        leaveDueDate: DateTime.now(),
+      ),
+    );
+
+    final statusStr = isOnline
+        ? (loc.isOnShift ? "On Shift (Present)" : "Pending check-in")
+        : "Offline/Absent";
+
+    final tooltipMsg = 'Name: ${worker.name}\n'
+        'Employee ID: ${worker.employeeId}\n'
+        'Phone: ${worker.phone}\n'
+        'Status: $statusStr';
 
     return Tooltip(
       message: tooltipMsg,
@@ -599,10 +632,13 @@ class _LiveMapViewState extends State<LiveMapView> {
     );
   }
 
-  Widget _buildOfflinePin(String name) {
-    final initials = getInitials(name);
+  Widget _buildOfflinePin(Worker worker) {
+    final initials = getInitials(worker.name);
     const color = Color(0xFFF44336); // Red for absent / offline/ static fallback
-    final tooltipMsg = 'Name: $name\nStatus: Offline/Absent';
+    final tooltipMsg = 'Name: ${worker.name}\n'
+        'Employee ID: ${worker.employeeId}\n'
+        'Phone: ${worker.phone}\n'
+        'Status: Offline/Absent';
 
     return Tooltip(
       message: tooltipMsg,
@@ -656,7 +692,7 @@ class _LiveMapViewState extends State<LiveMapView> {
               border: Border.all(color: color.withOpacity(0.5), width: 0.5),
             ),
             child: Text(
-              name.split(' ').first,
+              worker.name.split(' ').first,
               style: const TextStyle(color: Colors.grey, fontSize: 8),
             ),
           ),
