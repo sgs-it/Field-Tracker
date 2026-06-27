@@ -830,7 +830,27 @@ class TrackerState extends ChangeNotifier {
     // 3. Save to local storage
     _saveSitesToStorage();
     _saveGeofencesToStorage();
+    
+    // 4. Send POST request if new
+    if (fenceIdx == -1) {
+      _createGeofenceOnBackend(finalGeofence);
+    }
     notifyListeners();
+  }
+
+  Future<void> _createGeofenceOnBackend(AppGeofence geofence) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$kServerBaseUrl/api/geofences'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(geofence.toJson()),
+      ).timeout(const Duration(seconds: 10));
+      if (res.statusCode != 200 && res.statusCode != 201) {
+        debugPrint('[TrackerState] Geofence save failed: ${res.statusCode} ${res.body}');
+      }
+    } catch (e) {
+      debugPrint('[TrackerState] Geofence save error: $e');
+    }
   }
 
   Future<void> deleteSite(String siteId) async {
@@ -995,6 +1015,16 @@ class TrackerState extends ChangeNotifier {
       targetRole: 'Worker',
       targetWorkerId: workerId,
     );
+    
+    // Save to backend
+    Assignment? assignToSave;
+    try {
+      assignToSave = _assignments.firstWhere((a) => a.workerId == workerId && a.siteId == siteId && isSameDay(a.date, date));
+    } catch (_) {}
+    if (assignToSave != null) {
+      saveAssignmentToBackend(assignToSave);
+    }
+    saveAttendanceRecordToBackend(att);
 
     notifyListeners();
   }
@@ -1010,10 +1040,12 @@ class TrackerState extends ChangeNotifier {
       if (att != null) {
         att.visits.removeWhere((v) => v.siteId == assign.siteId);
         _recalculateAttendanceStatus(att);
+        saveAttendanceRecordToBackend(att);
       }
       
       _saveAssignmentsToStorage();
       _saveAttendanceRecordsToStorage();
+      deleteAssignmentFromBackend(assignmentId);
 
       String siteName = assign.siteId;
       try {
@@ -1690,11 +1722,16 @@ class TrackerState extends ChangeNotifier {
 
   Future<void> saveWorkerToBackend(Worker w) async {
     try {
-      await http.post(
+      final jsonBody = jsonEncode(w.toJson());
+      debugPrint('[TrackerState] Sending POST to api/workers: $jsonBody');
+      final res = await http.post(
         Uri.parse('$kServerBaseUrl/api/workers'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(w.toJson()),
-      ).timeout(const Duration(seconds: 2));
+        body: jsonBody,
+      ).timeout(const Duration(seconds: 10));
+      if (res.statusCode != 200 && res.statusCode != 201) {
+        debugPrint('[TrackerState] Worker save failed with status: ${res.statusCode} body: ${res.body}');
+      }
     } catch (e) {
       debugPrint('[TrackerState] Worker save error: $e');
     }
@@ -1724,11 +1761,14 @@ class TrackerState extends ChangeNotifier {
 
   Future<void> saveAssignmentToBackend(Assignment a) async {
     try {
-      await http.post(
+      final res = await http.post(
         Uri.parse('$kServerBaseUrl/api/assignments'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(a.toJson()),
-      ).timeout(const Duration(seconds: 2));
+      ).timeout(const Duration(seconds: 10));
+      if (res.statusCode != 200 && res.statusCode != 201) {
+        debugPrint('[TrackerState] Assignment save failed with status: ${res.statusCode} body: ${res.body}');
+      }
     } catch (e) {
       debugPrint('[TrackerState] Assignment save error: $e');
     }
@@ -1758,11 +1798,14 @@ class TrackerState extends ChangeNotifier {
 
   Future<void> saveAttendanceRecordToBackend(AttendanceRecord a) async {
     try {
-      await http.post(
+      final res = await http.post(
         Uri.parse('$kServerBaseUrl/api/attendance'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(a.toJson()),
-      ).timeout(const Duration(seconds: 2));
+      ).timeout(const Duration(seconds: 10));
+      if (res.statusCode != 200 && res.statusCode != 201) {
+        debugPrint('[TrackerState] Attendance save failed with status: ${res.statusCode} body: ${res.body}');
+      }
     } catch (e) {
       debugPrint('[TrackerState] Attendance save error: $e');
     }
