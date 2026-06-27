@@ -159,17 +159,22 @@ class _MainNavigationControllerState extends State<MainNavigationController> {
           children: [
             const WorkerView(),
             Positioned(
-              top: 48,
-              left: 16,
-              child: CircleAvatar(
-                backgroundColor: Colors.black.withOpacity(0.6),
-                child: IconButton(
-                  icon: const Icon(Icons.logout, color: Colors.tealAccent, size: 18),
-                  onPressed: () {
-                    setState(() {
-                      _isLoggedIn = false;
-                    });
-                  },
+              top: 42,
+              right: 16,
+              child: SafeArea(
+                child: CircleAvatar(
+                  radius: 18,
+                  backgroundColor: Colors.black.withOpacity(0.6),
+                  child: IconButton(
+                    icon: const Icon(Icons.logout, color: Colors.tealAccent, size: 16),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    onPressed: () {
+                      setState(() {
+                        _isLoggedIn = false;
+                      });
+                    },
+                  ),
                 ),
               ),
             ),
@@ -179,35 +184,42 @@ class _MainNavigationControllerState extends State<MainNavigationController> {
     } else {
       // Supervisor, Engineer, Admin Dashboard Fullscreen
       return Scaffold(
-        body: Column(
-          children: [
-            // Header showing role, logout button
-            Container(
-              height: 50,
-              color: const Color(0xFF13131A),
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  Text(
-                    'Logged In: ${state.activeRoleId}',
-                    style: const TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(width: 16),
-                  TextButton.icon(
-                    onPressed: () {
-                      setState(() {
-                        _isLoggedIn = false;
-                      });
-                    },
-                    icon: const Icon(Icons.logout, size: 14, color: Colors.tealAccent),
-                    label: const Text('LOGOUT', style: TextStyle(color: Colors.white, fontSize: 11)),
-                  ),
-                ],
+        body: SafeArea(
+          bottom: false,
+          child: Column(
+            children: [
+              // Header showing role, logout button
+              Container(
+                height: 38, // Sleek, decreased height
+                color: const Color(0xFF13131A),
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    Text(
+                      'Logged In: ${state.activeRoleId}',
+                      style: const TextStyle(color: Colors.grey, fontSize: 11, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(width: 12),
+                    TextButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _isLoggedIn = false;
+                        });
+                      },
+                      style: TextButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      icon: const Icon(Icons.logout, size: 12, color: Colors.tealAccent),
+                      label: const Text('LOGOUT', style: TextStyle(color: Colors.white, fontSize: 10)),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const Expanded(child: DashboardView()),
-          ],
+              const Expanded(child: DashboardView()),
+            ],
+          ),
         ),
       );
     }

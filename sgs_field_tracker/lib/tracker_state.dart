@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
-import 'dart:html' as html;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:geolocator/geolocator.dart';
@@ -10,6 +10,7 @@ import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'geofence_model.dart';
 import 'models.dart';
+import 'map_service.dart' show kServerBaseUrl, kWsBaseUrl;
 
 class TrackerState extends ChangeNotifier {
   // Lists holding current application state
@@ -19,6 +20,7 @@ class TrackerState extends ChangeNotifier {
   List<AttendanceRecord> _attendanceRecords = [];
   List<TamperAlert> _tamperAlerts = [];
   List<HeartbeatLog> _heartbeatLogs = [];
+  List<AppNotification> _notifications = [];
 
   // Active user selections
   String _activeRoleId = 'Admin'; // Admin, Engineer, Supervisor, Worker
@@ -30,6 +32,10 @@ class TrackerState extends ChangeNotifier {
   bool _isFakeGpsEnabled = false;
   bool _isInternetEnabled = true;
   bool _morningAlarmTriggered = false;
+  bool _morningAlarmEnabled = true;
+  bool _endShiftAlarmEnabled = true;
+  bool _notificationsEnabled = true;
+  bool _endShiftAlarmTriggered = false;
 
   // Live GPS tracking and WebSocket client state
   WebSocketChannel? _workerWsChannel;
@@ -85,7 +91,26 @@ class TrackerState extends ChangeNotifier {
   bool get isFakeGpsEnabled => _isFakeGpsEnabled;
   bool get isInternetEnabled => _isInternetEnabled;
   bool get morningAlarmTriggered => _morningAlarmTriggered;
+  bool get morningAlarmEnabled => _morningAlarmEnabled;
+  bool get endShiftAlarmEnabled => _endShiftAlarmEnabled;
+  bool get notificationsEnabled => _notificationsEnabled;
+  bool get endShiftAlarmTriggered => _endShiftAlarmTriggered;
   DateTime get selectedDate => _selectedDate;
+
+  List<AppNotification> get allNotifications => _notifications;
+
+  List<AppNotification> get activeNotifications {
+    if (_activeRoleId == 'Worker') {
+      return _notifications
+          .where((n) => !n.isRead && n.targetRole == 'Worker' && (n.targetWorkerId == null || n.targetWorkerId == _selectedWorkerId))
+          .toList();
+    } else if (_activeRoleId == 'Admin' || _activeRoleId == 'Supervisor') {
+      return _notifications
+          .where((n) => !n.isRead && (n.targetRole == 'Admin' || n.targetRole == 'Supervisor'))
+          .toList();
+    }
+    return [];
+  }
 
   String get companyShiftStart => _companyShiftStart;
   int get companyShiftHours => _companyShiftHours;
@@ -157,18 +182,53 @@ class TrackerState extends ChangeNotifier {
   Timer? _geofencePollTimer;
 
   TrackerState() {
-    _loadWorkersFromStorage();
+    _init();
+  }
+
+  Future<void> _init() async {
+    await _loadSettingsFromStorage();
+    await _loadWorkersFromStorage();
+    await _loadSitesFromStorage();
+    await _loadGeofencesFromStorage();
+    await _loadAssignmentsFromStorage();
+    await _loadAttendanceRecordsFromStorage();
+    await _loadTamperAlertsFromStorage();
+    await _loadHeartbeatLogsFromStorage();
+    await _loadNotificationsFromStorage();
     _seedInitialData();
-    fetchGeofencesFromBackend();
     _initializeCurrentLocation();
     _geofencePollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       fetchGeofencesFromBackend();
     });
+    notifyListeners();
   }
 
-  void _loadWorkersFromStorage() {
+  Future<void> _saveSettingsToStorage() async {
     try {
-      final jsonStr = html.window.localStorage['sgs_field_tracker_workers'];
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('sgs_morning_alarm_enabled', _morningAlarmEnabled);
+      await prefs.setBool('sgs_end_shift_alarm_enabled', _endShiftAlarmEnabled);
+      await prefs.setBool('sgs_notifications_enabled', _notificationsEnabled);
+    } catch (e) {
+      debugPrint('Error saving settings to storage: $e');
+    }
+  }
+
+  Future<void> _loadSettingsFromStorage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _morningAlarmEnabled = prefs.getBool('sgs_morning_alarm_enabled') ?? true;
+      _endShiftAlarmEnabled = prefs.getBool('sgs_end_shift_alarm_enabled') ?? true;
+      _notificationsEnabled = prefs.getBool('sgs_notifications_enabled') ?? true;
+    } catch (e) {
+      debugPrint('Error loading settings from storage: $e');
+    }
+  }
+
+  Future<void> _loadWorkersFromStorage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonStr = prefs.getString('sgs_field_tracker_workers');
       if (jsonStr != null && jsonStr.isNotEmpty) {
         final List<dynamic> list = jsonDecode(jsonStr);
         _workers = list.map((e) => Worker.fromJson(e as Map<String, dynamic>)).toList();
@@ -179,7 +239,6 @@ class TrackerState extends ChangeNotifier {
       debugPrint('Error loading workers from local storage: $e');
       _workers = [];
     }
-    
     if (_workers.isNotEmpty) {
       _selectedWorkerId = _workers.first.id;
     } else {
@@ -187,16 +246,302 @@ class TrackerState extends ChangeNotifier {
     }
   }
 
-  void _saveWorkersToStorage() {
+  Future<void> _loadSitesFromStorage() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonStr = prefs.getString('sgs_field_tracker_sites');
+      if (jsonStr != null && jsonStr.isNotEmpty) {
+        final List<dynamic> list = jsonDecode(jsonStr);
+        _sites = list.map((e) => Site.fromJson(e as Map<String, dynamic>)).toList();
+      }
+    } catch (e) {
+      debugPrint('Error loading sites from local storage: $e');
+    }
+  }
+
+  Future<void> _saveSitesToStorage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonStr = jsonEncode(_sites.map((e) => e.toJson()).toList());
+      await prefs.setString('sgs_field_tracker_sites', jsonStr);
+    } catch (e) {
+      debugPrint('Error saving sites to local storage: $e');
+    }
+  }
+
+  Future<void> _saveWorkersToStorage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
       final jsonStr = jsonEncode(_workers.map((w) => w.toJson()).toList());
-      html.window.localStorage['sgs_field_tracker_workers'] = jsonStr;
+      await prefs.setString('sgs_field_tracker_workers', jsonStr);
     } catch (e) {
       debugPrint('Error saving workers to local storage: $e');
     }
   }
 
+  Future<void> _saveAssignmentsToStorage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonStr = jsonEncode(_assignments.map((a) => a.toJson()).toList());
+      await prefs.setString('sgs_field_tracker_assignments', jsonStr);
+    } catch (e) {
+      debugPrint('Error saving assignments to local storage: $e');
+    }
+  }
+
+  Future<void> _loadAssignmentsFromStorage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonStr = prefs.getString('sgs_field_tracker_assignments');
+      if (jsonStr != null && jsonStr.isNotEmpty) {
+        final List<dynamic> list = jsonDecode(jsonStr);
+        _assignments = list.map((e) => Assignment.fromJson(e as Map<String, dynamic>)).toList();
+      } else {
+        _assignments = [];
+      }
+    } catch (e) {
+      debugPrint('Error loading assignments: $e');
+      _assignments = [];
+    }
+  }
+
+  Future<void> _saveAttendanceRecordsToStorage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonStr = jsonEncode(_attendanceRecords.map((r) => r.toJson()).toList());
+      await prefs.setString('sgs_field_tracker_attendance', jsonStr);
+    } catch (e) {
+      debugPrint('Error saving attendance: $e');
+    }
+  }
+
+  Future<void> _loadAttendanceRecordsFromStorage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonStr = prefs.getString('sgs_field_tracker_attendance');
+      if (jsonStr != null && jsonStr.isNotEmpty) {
+        final List<dynamic> list = jsonDecode(jsonStr);
+        _attendanceRecords = list.map((e) => AttendanceRecord.fromJson(e as Map<String, dynamic>)).toList();
+      } else {
+        _attendanceRecords = [];
+      }
+    } catch (e) {
+      debugPrint('Error loading attendance: $e');
+      _attendanceRecords = [];
+    }
+  }
+
+  Future<void> _saveTamperAlertsToStorage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonStr = jsonEncode(_tamperAlerts.map((a) => a.toJson()).toList());
+      await prefs.setString('sgs_field_tracker_tamper_alerts', jsonStr);
+    } catch (e) {
+      debugPrint('Error saving tamper alerts: $e');
+    }
+  }
+
+  Future<void> _loadTamperAlertsFromStorage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonStr = prefs.getString('sgs_field_tracker_tamper_alerts');
+      if (jsonStr != null && jsonStr.isNotEmpty) {
+        final List<dynamic> list = jsonDecode(jsonStr);
+        _tamperAlerts = list.map((e) => TamperAlert.fromJson(e as Map<String, dynamic>)).toList();
+      } else {
+        _tamperAlerts = [];
+      }
+    } catch (e) {
+      debugPrint('Error loading tamper alerts: $e');
+      _tamperAlerts = [];
+    }
+  }
+
+  Future<void> _saveHeartbeatLogsToStorage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonStr = jsonEncode(_heartbeatLogs.map((l) => l.toJson()).toList());
+      await prefs.setString('sgs_field_tracker_heartbeat_logs', jsonStr);
+    } catch (e) {
+      debugPrint('Error saving heartbeat logs: $e');
+    }
+  }
+
+  Future<void> _loadHeartbeatLogsFromStorage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonStr = prefs.getString('sgs_field_tracker_heartbeat_logs');
+      if (jsonStr != null && jsonStr.isNotEmpty) {
+        final List<dynamic> list = jsonDecode(jsonStr);
+        _heartbeatLogs = list.map((e) => HeartbeatLog.fromJson(e as Map<String, dynamic>)).toList();
+      } else {
+        _heartbeatLogs = [];
+      }
+    } catch (e) {
+      debugPrint('Error loading heartbeat logs: $e');
+      _heartbeatLogs = [];
+    }
+  }
+
+  Future<void> _saveGeofencesToStorage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonStr = jsonEncode(_backendGeofences.map((g) => g.toJson()).toList());
+      await prefs.setString('sgs_field_tracker_geofences', jsonStr);
+    } catch (e) {
+      debugPrint('Error saving geofences: $e');
+    }
+  }
+
+  Future<void> _loadGeofencesFromStorage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonStr = prefs.getString('sgs_field_tracker_geofences');
+      if (jsonStr != null && jsonStr.isNotEmpty) {
+        final List<dynamic> list = jsonDecode(jsonStr);
+        _backendGeofences = list.map((e) => AppGeofence.fromJson(e as Map<String, dynamic>)).toList();
+        
+        final List<Site> loadedSites = [];
+        for (final fence in _backendGeofences) {
+          final siteId = fence.siteId ?? fence.id;
+          final double lat = fence.center?.latitude ??
+              (fence.polygon != null && fence.polygon!.isNotEmpty
+                  ? (fence.polygon!.map((p) => p.latitude).reduce((a, b) => a + b) / fence.polygon!.length)
+                  : 25.1234);
+          final double lng = fence.center?.longitude ??
+              (fence.polygon != null && fence.polygon!.isNotEmpty
+                  ? (fence.polygon!.map((p) => p.longitude).reduce((a, b) => a + b) / fence.polygon!.length)
+                  : 55.3456);
+          final double radius = fence.radiusM ?? 100.0;
+          
+          final cat = JobCategory.values.firstWhere(
+            (e) => e.name == fence.category || e.toString().split('.').last == fence.category,
+            orElse: () => JobCategory.AMC,
+          );
+          final subCat = SubCategory.values.firstWhere(
+            (e) => e.name == fence.subCategory || e.toString().split('.').last == fence.subCategory,
+            orElse: () => SubCategory.Outdoor,
+          );
+          final jobT = JobType.values.firstWhere(
+            (e) => e.name == fence.jobType || e.toString().split('.').last == fence.jobType,
+            orElse: () => JobType.Permanent,
+          );
+          final freq = JobFrequency.values.firstWhere(
+            (e) => e.name == fence.frequency || e.toString().split('.').last == fence.frequency,
+            orElse: () => JobFrequency.Daily,
+          );
+
+          loadedSites.add(Site(
+            id: siteId,
+            name: fence.name,
+            code: fence.code.isNotEmpty ? fence.code : fence.name.substring(0, min(5, fence.name.length)).toUpperCase(),
+            category: cat,
+            subCategory: subCat,
+            jobType: jobT,
+            frequency: freq,
+            address: fence.address,
+            latitude: lat,
+            longitude: lng,
+            radius: radius,
+            plannedStartTime: fence.plannedStartTime.isNotEmpty ? fence.plannedStartTime : '08:00 AM',
+            plannedEndTime: fence.plannedEndTime.isNotEmpty ? fence.plannedEndTime : '05:00 PM',
+            isAccommodation: fence.isAccommodation,
+          ));
+        }
+        if (loadedSites.isNotEmpty) {
+          _sites = loadedSites;
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading geofences: $e');
+    }
+  }
+
+  Future<void> _saveNotificationsToStorage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonStr = jsonEncode(_notifications.map((n) => n.toJson()).toList());
+      await prefs.setString('sgs_field_tracker_notifications', jsonStr);
+    } catch (e) {
+      debugPrint('Error saving notifications: $e');
+    }
+  }
+
+  Future<void> _loadNotificationsFromStorage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonStr = prefs.getString('sgs_field_tracker_notifications');
+      if (jsonStr != null && jsonStr.isNotEmpty) {
+        final List<dynamic> list = jsonDecode(jsonStr);
+        _notifications = list.map((e) => AppNotification.fromJson(e as Map<String, dynamic>)).toList();
+      } else {
+        _notifications = [];
+      }
+    } catch (e) {
+      debugPrint('Error loading notifications: $e');
+      _notifications = [];
+    }
+  }
+
+  void addNotification({
+    required String title,
+    required String message,
+    required String targetRole,
+    String? targetWorkerId,
+  }) {
+    final notification = AppNotification(
+      id: 'notif_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(1000)}',
+      title: title,
+      message: message,
+      targetRole: targetRole,
+      targetWorkerId: targetWorkerId,
+      timestamp: _simulatedTime,
+    );
+    _notifications.add(notification);
+    _saveNotificationsToStorage();
+    notifyListeners();
+  }
+
+  void markNotificationAsRead(String id) {
+    int index = _notifications.indexWhere((n) => n.id == id);
+    if (index != -1) {
+      _notifications[index].isRead = true;
+      _saveNotificationsToStorage();
+      notifyListeners();
+    }
+  }
+
+  void clearAllNotifications() {
+    _notifications.clear();
+    _saveNotificationsToStorage();
+    notifyListeners();
+  }
+
+  void toggleMorningAlarmEnabled(bool val) {
+    _morningAlarmEnabled = val;
+    _saveSettingsToStorage();
+    notifyListeners();
+  }
+
+  void toggleEndShiftAlarmEnabled(bool val) {
+    _endShiftAlarmEnabled = val;
+    _saveSettingsToStorage();
+    notifyListeners();
+  }
+
+  void toggleNotificationsEnabled(bool val) {
+    _notificationsEnabled = val;
+    _saveSettingsToStorage();
+    notifyListeners();
+  }
+
+  void triggerEndShiftAlarm(bool value) {
+    _endShiftAlarmTriggered = value;
+    notifyListeners();
+  }
+
   void _seedInitialData() {
+    if (_sites.isNotEmpty) return;
     // 1. Seed Sites (including accommodation)
     _sites = [];
 
@@ -321,7 +666,7 @@ class TrackerState extends ChangeNotifier {
     
     // Check if alarm should be triggered
     // Morning alarm triggers 30 mins before accommodation departure (planned exit from ACC-001 is 08:30 AM in initial setup, so alarm at 08:00 AM)
-    if (_simulatedTime.hour == 8 && _simulatedTime.minute == 0 && !_morningAlarmTriggered) {
+    if (_simulatedTime.hour == 8 && _simulatedTime.minute == 0 && !_morningAlarmTriggered && _morningAlarmEnabled) {
       _morningAlarmTriggered = true;
     }
     
@@ -330,6 +675,12 @@ class TrackerState extends ChangeNotifier {
     if (att != null && att.shiftStart != null && att.shiftEnd == null) {
       if (_simulatedTime.minute == 0 || _simulatedTime.minute == 30) {
         logHeartbeat(currentWorker.id, 25.2048, 55.2708);
+      }
+
+      // End shift alarm triggers when work duration reaches or exceeds company shift hours
+      final workDuration = _simulatedTime.difference(att.shiftStart!);
+      if (workDuration.inHours >= _companyShiftHours && !_endShiftAlarmTriggered && _endShiftAlarmEnabled) {
+        _endShiftAlarmTriggered = true;
       }
     }
 
@@ -388,8 +739,13 @@ class TrackerState extends ChangeNotifier {
   // Site Management CRUD
   void addSite(Site site) {
     _sites.add(site);
-    
-    // Update active attendance records to include new site if they have assignments
+    _saveSitesToStorage();
+    _saveGeofencesToStorage();
+    addNotification(
+      title: 'New Site Registered',
+      message: 'A new site has been added: ${site.name} (${site.code}) at ${site.address}.',
+      targetRole: 'Worker',
+    );
     notifyListeners();
   }
 
@@ -397,34 +753,67 @@ class TrackerState extends ChangeNotifier {
     int index = _sites.indexWhere((s) => s.id == updatedSite.id);
     if (index != -1) {
       _sites[index] = updatedSite;
+      _saveSitesToStorage();
+      _saveGeofencesToStorage();
       notifyListeners();
     }
   }
 
-  Future<void> editSiteInBackend(Site updatedSite, AppGeofence updatedGeofence) async {
+  Future<bool> editSiteInBackend(Site updatedSite, AppGeofence updatedGeofence) async {
     final idx = _backendGeofences.indexWhere((g) => g.siteId == updatedSite.id);
     if (idx != -1) {
       final fenceId = _backendGeofences[idx].id;
       final geofenceToPost = updatedGeofence.copyWith(id: fenceId);
       try {
         final res = await http.put(
-          Uri.parse('http://localhost:8080/api/geofences/$fenceId'),
+          Uri.parse('$kServerBaseUrl/api/geofences/$fenceId'),
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode(geofenceToPost.toJson()),
-        );
+        ).timeout(const Duration(seconds: 2));
         if (res.statusCode == 200) {
           _backendGeofences[idx] = geofenceToPost;
+          _saveGeofencesToStorage();
+          
+          int index = _sites.indexWhere((s) => s.id == updatedSite.id);
+          if (index != -1) {
+            _sites[index] = updatedSite;
+            _saveSitesToStorage();
+            notifyListeners();
+          }
+          return true;
         }
       } catch (e) {
         debugPrint('[TrackerState] Edit site error: $e');
       }
     }
+    return false;
+  }
 
-    int index = _sites.indexWhere((s) => s.id == updatedSite.id);
-    if (index != -1) {
-      _sites[index] = updatedSite;
-      notifyListeners();
+  void saveSiteLocally(Site site, AppGeofence geofence) {
+    // 1. Update/Add in _sites
+    final siteIdx = _sites.indexWhere((s) => s.id == site.id);
+    if (siteIdx != -1) {
+      _sites[siteIdx] = site;
+    } else {
+      _sites.add(site);
     }
+
+    // 2. Update/Add in _backendGeofences
+    final fenceIdx = _backendGeofences.indexWhere((g) => g.siteId == site.id || (g.id.isNotEmpty && g.id == geofence.id));
+    final finalGeofence = geofence.copyWith(
+      id: geofence.id.isEmpty ? site.id : geofence.id,
+      siteId: site.id,
+    );
+    if (fenceIdx != -1) {
+      _backendGeofences[fenceIdx] = finalGeofence;
+    } else {
+      _backendGeofences.add(finalGeofence);
+    }
+
+    // 3. Save to local storage
+    _saveSitesToStorage();
+    _saveGeofencesToStorage();
+    notifyListeners();
   }
 
   Future<void> deleteSite(String siteId) async {
@@ -432,9 +821,10 @@ class TrackerState extends ChangeNotifier {
     if (idx != -1) {
       final fenceId = _backendGeofences[idx].id;
       try {
-        final res = await http.delete(Uri.parse('http://localhost:8080/api/geofences/$fenceId'));
+        final res = await http.delete(Uri.parse('$kServerBaseUrl/api/geofences/$fenceId'));
         if (res.statusCode == 200) {
           _backendGeofences.removeAt(idx);
+          _saveGeofencesToStorage();
         }
       } catch (e) {
         debugPrint('[TrackerState] Delete site error: $e');
@@ -442,6 +832,7 @@ class TrackerState extends ChangeNotifier {
     }
     
     _sites.removeWhere((s) => s.id == siteId);
+    _saveSitesToStorage();
     notifyListeners();
   }
 
@@ -460,6 +851,12 @@ class TrackerState extends ChangeNotifier {
       visits: [],
       status: 'Present', // present if no assigned sites
     ));
+    addNotification(
+      title: 'Welcome to SGS Field Tracker',
+      message: 'Hello ${worker.name}, your account is active.',
+      targetRole: 'Worker',
+      targetWorkerId: worker.id,
+    );
     notifyListeners();
   }
 
@@ -468,6 +865,12 @@ class TrackerState extends ChangeNotifier {
     if (index != -1) {
       _workers[index] = updatedWorker;
       _saveWorkersToStorage();
+      addNotification(
+        title: 'Profile Updated',
+        message: 'Your profile has been updated by the admin.',
+        targetRole: 'Worker',
+        targetWorkerId: updatedWorker.id,
+      );
       notifyListeners();
     }
   }
@@ -528,14 +931,22 @@ class TrackerState extends ChangeNotifier {
       att.visits.add(VisitRecord(
         siteId: siteId,
         status: 'Pending',
-        checklistAtVisit: checklist.map((c) => c.copy()).toList(),
+        checklistAtVisit: checklist.map((c) {
+          final copy = c.copy();
+          copy.isCompleted = false;
+          return copy;
+        }).toList(),
       ));
     } else {
       // update checklist
       att.visits[visitIndex] = VisitRecord(
         siteId: siteId,
         status: att.visits[visitIndex].status,
-        checklistAtVisit: checklist.map((c) => c.copy()).toList(),
+        checklistAtVisit: checklist.map((c) {
+          final copy = c.copy();
+          copy.isCompleted = false;
+          return copy;
+        }).toList(),
         entryTime: att.visits[visitIndex].entryTime,
         exitTime: att.visits[visitIndex].exitTime,
         photoPath: att.visits[visitIndex].photoPath,
@@ -544,6 +955,27 @@ class TrackerState extends ChangeNotifier {
     }
 
     _recalculateAttendanceStatus(att);
+    _saveAssignmentsToStorage();
+    _saveAttendanceRecordsToStorage();
+
+    String siteName = siteId;
+    try {
+      final s = _sites.firstWhere((x) => x.id == siteId);
+      siteName = s.name;
+    } catch (_) {
+      try {
+        final f = _backendGeofences.firstWhere((x) => x.id == siteId);
+        siteName = f.name;
+      } catch (_) {}
+    }
+
+    addNotification(
+      title: 'New Site Assigned',
+      message: 'You have been assigned to site: $siteName. Shift: Morning Shift. Instructions: $instructions',
+      targetRole: 'Worker',
+      targetWorkerId: workerId,
+    );
+
     notifyListeners();
   }
 
@@ -559,6 +991,23 @@ class TrackerState extends ChangeNotifier {
         att.visits.removeWhere((v) => v.siteId == assign.siteId);
         _recalculateAttendanceStatus(att);
       }
+      
+      _saveAssignmentsToStorage();
+      _saveAttendanceRecordsToStorage();
+
+      String siteName = assign.siteId;
+      try {
+        final s = _sites.firstWhere((x) => x.id == assign.siteId);
+        siteName = s.name;
+      } catch (_) {}
+
+      addNotification(
+        title: 'Assignment Removed',
+        message: 'Your assignment for site: $siteName has been removed.',
+        targetRole: 'Worker',
+        targetWorkerId: assign.workerId,
+      );
+
       notifyListeners();
     }
   }
@@ -777,9 +1226,28 @@ class TrackerState extends ChangeNotifier {
 
     if (_isInternetEnabled) {
       _tamperAlerts.add(alert);
+      _saveTamperAlertsToStorage();
     } else {
       _offlineAlerts.add(alert);
     }
+
+    String workerName = workerId;
+    try {
+      final w = _workers.firstWhere((x) => x.id == workerId);
+      workerName = w.name;
+    } catch (_) {}
+
+    addNotification(
+      title: 'Security Alert: Location Tampering',
+      message: 'Worker $workerName triggered a security alert: $type - $details',
+      targetRole: 'Admin',
+    );
+    addNotification(
+      title: 'Security Alert: Location Tampering',
+      message: 'Worker $workerName triggered a security alert: $type - $details',
+      targetRole: 'Supervisor',
+    );
+
     notifyListeners();
   }
 
@@ -793,7 +1261,7 @@ class TrackerState extends ChangeNotifier {
 
     final worker = currentWorker;
     // Replace localhost with network IP when debugging on actual phones
-    final wsUrl = 'ws://localhost:8080/ws?role=worker&workerId=${worker.id}&workerName=${Uri.encodeComponent(worker.name)}';
+    final wsUrl = '$kWsBaseUrl/ws?role=worker&workerId=${worker.id}&workerName=${Uri.encodeComponent(worker.name)}';
 
     try {
       _workerWsChannel = WebSocketChannel.connect(Uri.parse(wsUrl));
@@ -1086,7 +1554,7 @@ class TrackerState extends ChangeNotifier {
       for (final item in items) {
         try {
           final res = await http.post(
-            Uri.parse('http://localhost:8080/api/heartbeat'),
+            Uri.parse('$kServerBaseUrl/api/heartbeat'),
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode(item),
           );
@@ -1107,13 +1575,17 @@ class TrackerState extends ChangeNotifier {
 
   Future<void> fetchGeofencesFromBackend() async {
     try {
-      final res = await http.get(Uri.parse('http://localhost:8080/api/geofences'));
+      final res = await http.get(Uri.parse('$kServerBaseUrl/api/geofences'));
       if (res.statusCode == 200) {
         final list = jsonDecode(res.body) as List<dynamic>;
+        
+        final existingIds = _backendGeofences.map((g) => g.id).toSet();
+        
         _backendGeofences.clear();
         _backendGeofences.addAll(
           list.map((e) => AppGeofence.fromJson(e as Map<String, dynamic>)),
         );
+        _saveGeofencesToStorage();
 
         final List<Site> newSites = [];
         for (final fence in _backendGeofences) {
@@ -1161,6 +1633,14 @@ class TrackerState extends ChangeNotifier {
             plannedEndTime: fence.plannedEndTime.isNotEmpty ? fence.plannedEndTime : '05:00 PM',
             isAccommodation: fence.isAccommodation,
           ));
+
+          if (existingIds.isNotEmpty && !existingIds.contains(fence.id)) {
+            addNotification(
+              title: 'New Geofence Site Added',
+              message: 'Site: ${fence.name} has been added by admin.',
+              targetRole: 'Worker',
+            );
+          }
         }
 
         if (newSites.isNotEmpty) {
@@ -1233,7 +1713,11 @@ class TrackerState extends ChangeNotifier {
             .map((a) => VisitRecord(
                   siteId: a.siteId,
                   status: 'Pending',
-                  checklistAtVisit: a.checklist.map((c) => c.copy()).toList(),
+                  checklistAtVisit: a.checklist.map((c) {
+                    final copy = c.copy();
+                    copy.isCompleted = false;
+                    return copy;
+                  }).toList(),
                 ))
             .toList(),
       );

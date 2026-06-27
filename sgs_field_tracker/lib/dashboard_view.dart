@@ -8,7 +8,7 @@ import 'tracker_state.dart';
 import 'models.dart';
 import 'geofence_model.dart';
 import 'map_service.dart';
-import 'live_map_view.dart';
+import 'live_map_view.dart' show LiveMapView, MapStyle, hexToColor;
 import 'worker_location.dart';
 import 'dart:math';
 
@@ -68,25 +68,35 @@ class _DashboardViewState extends State<DashboardView> {
 
     return Scaffold(
       backgroundColor: const Color(0xFF13131A),
-      body: Row(
+      body: Stack(
         children: [
-          // Sidebar (Visible only on desktop/large screens)
-          if (isDesktop) _buildSidebar(context, state),
-          
-          // Main Body Content
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildTopNav(context, state, isDesktop),
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.all(24),
-                    child: _buildActiveTabContent(context, state),
-                  ),
+          Row(
+            children: [
+              // Sidebar (Visible only on desktop/large screens)
+              if (isDesktop) _buildSidebar(context, state),
+              
+              // Main Body Content
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildTopNav(context, state, isDesktop),
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.all(24),
+                        child: _buildActiveTabContent(context, state),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
+          ),
+          Positioned(
+            top: 80,
+            right: 24,
+            width: 320,
+            child: _buildFloatingNotifications(context, state),
           ),
         ],
       ),
@@ -173,27 +183,37 @@ class _DashboardViewState extends State<DashboardView> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(
-            children: [
-              if (!isDesktop)
-                IconButton(
-                  icon: const Icon(Icons.menu, color: Colors.white),
-                  onPressed: () => Scaffold.of(context).openDrawer(),
+          Expanded(
+            child: Row(
+              children: [
+                if (!isDesktop)
+                  Builder(
+                    builder: (ctx) => IconButton(
+                      icon: const Icon(Icons.menu, color: Colors.white),
+                      onPressed: () => Scaffold.of(ctx).openDrawer(),
+                    ),
+                  ),
+                Expanded(
+                  child: Text(
+                    _activeTab == 0 ? '' : _tabs[_activeTab],
+                    style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-              Text(
-                _activeTab == 0 ? '' : _tabs[_activeTab],
-                style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-            ],
+              ],
+            ),
           ),
           // Role & Date selection
           Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
               // Role dropdown selector
-              const Text('Active Role: ', style: TextStyle(color: Colors.grey, fontSize: 12)),
-              const SizedBox(width: 8),
+              if (isDesktop)
+                const Text('Active Role: ', style: TextStyle(color: Colors.grey, fontSize: 12)),
+              if (isDesktop)
+                const SizedBox(width: 8),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
                 decoration: BoxDecoration(
                   color: const Color(0xFF13131A),
                   borderRadius: BorderRadius.circular(8),
@@ -212,10 +232,12 @@ class _DashboardViewState extends State<DashboardView> {
                   }).toList(),
                 ),
               ),
-              const SizedBox(width: 16),
-              // Date picker display
+              if (isDesktop)
+                const SizedBox(width: 16)
+              else
+                const SizedBox(width: 8),
               // Date picker display (hidden on dashboard)
-              if (_activeTab != 0)
+              if (_activeTab != 0 && isDesktop)
                 InkWell(
                   onTap: () async {
                     DateTime? picked = await showDatePicker(
@@ -348,6 +370,8 @@ class _DashboardViewState extends State<DashboardView> {
   }
 
   Widget _buildDashboard(BuildContext context, TrackerState state) {
+    final isDesktop = MediaQuery.of(context).size.width > 900;
+
     final filteredWorkers = _selectedDepartmentFilter == 'All'
         ? state.workers
         : state.workers.where((w) => w.department == _selectedDepartmentFilter).toList();
@@ -379,14 +403,19 @@ class _DashboardViewState extends State<DashboardView> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 16,
+            runSpacing: 16,
             children: [
               const Text(
                 'Dashboard',
                 style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
               ),
-              Row(
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
                 children: [
                   InkWell(
                     onTap: () async {
@@ -406,11 +435,12 @@ class _DashboardViewState extends State<DashboardView> {
                         border: Border.all(color: const Color(0xFF2D2D38)),
                       ),
                       child: Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
                           const Icon(Icons.calendar_today, color: Colors.tealAccent, size: 14),
                           const SizedBox(width: 8),
                           Text(
-                            DateFormat('dd MMMM yyyy').format(state.selectedDate),
+                            DateFormat('dd MMM yyyy').format(state.selectedDate),
                             style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
                           ),
                           const SizedBox(width: 6),
@@ -430,12 +460,16 @@ class _DashboardViewState extends State<DashboardView> {
                         border: Border.all(color: const Color(0xFF2D2D38)),
                       ),
                       child: Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
                           const Icon(Icons.filter_alt_outlined, color: Colors.grey, size: 14),
                           const SizedBox(width: 6),
-                          Text(
-                            _selectedDepartmentFilter == 'All' ? 'Filters' : 'Filter: $_selectedDepartmentFilter',
-                            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                          Flexible(
+                            child: Text(
+                              _selectedDepartmentFilter == 'All' ? 'Filters' : 'Filter: $_selectedDepartmentFilter',
+                              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                         ],
                       ),
@@ -447,29 +481,198 @@ class _DashboardViewState extends State<DashboardView> {
           ),
           const SizedBox(height: 24),
 
-          Row(
-            children: [
-              _buildDashboardStatCard('Total Workers', '$totalWorkers', null, Colors.white),
-              const SizedBox(width: 16),
-              _buildDashboardStatCard('Present', '$presentCount', '$presentPct%', const Color(0xFF00BFA5)),
-              const SizedBox(width: 16),
-              _buildDashboardStatCard('Pending', '$pendingCount', '$pendingPct%', const Color(0xFFFF9800)),
-              const SizedBox(width: 16),
-              _buildDashboardStatCard('Absent', '$absentCount', '$absentPct%', const Color(0xFFF44336)),
-              const SizedBox(width: 16),
-              _buildDashboardStatCard('GPS Offline', '$gpsOfflineCount', '$offlinePct%', const Color(0xFFF44336)),
-            ],
-          ),
+          if (isDesktop)
+            Row(
+              children: [
+                _buildDashboardStatCard('Total Workers', '$totalWorkers', null, Colors.white),
+                const SizedBox(width: 16),
+                _buildDashboardStatCard('Present', '$presentCount', '$presentPct%', const Color(0xFF00BFA5)),
+                const SizedBox(width: 16),
+                _buildDashboardStatCard('Pending', '$pendingCount', '$pendingPct%', const Color(0xFFFF9800)),
+                const SizedBox(width: 16),
+                _buildDashboardStatCard('Absent', '$absentCount', '$absentPct%', const Color(0xFFF44336)),
+                const SizedBox(width: 16),
+                _buildDashboardStatCard('GPS Offline', '$gpsOfflineCount', '$offlinePct%', const Color(0xFFF44336)),
+              ],
+            )
+          else
+            Column(
+              children: [
+                Row(
+                  children: [
+                    _buildDashboardStatCard('Total Workers', '$totalWorkers', null, Colors.white),
+                    const SizedBox(width: 12),
+                    _buildDashboardStatCard('Present', '$presentCount', '$presentPct%', const Color(0xFF00BFA5)),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    _buildDashboardStatCard('Pending', '$pendingCount', '$pendingPct%', const Color(0xFFFF9800)),
+                    const SizedBox(width: 12),
+                    _buildDashboardStatCard('Absent', '$absentCount', '$absentPct%', const Color(0xFFF44336)),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    _buildDashboardStatCard('GPS Offline', '$gpsOfflineCount', '$offlinePct%', const Color(0xFFF44336)),
+                  ],
+                ),
+              ],
+            ),
           const SizedBox(height: 24),
 
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                flex: 2,
-                child: Container(
-                  height: 480,
-                  padding: const EdgeInsets.all(20),
+          if (isDesktop)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  flex: 2,
+                  child: Container(
+                    height: 480,
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E1E26),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFF2D2D38)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Wrap(
+                          alignment: WrapAlignment.spaceBetween,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          spacing: 12,
+                          runSpacing: 12,
+                          children: [
+                            const Text(
+                              'Live Workers on Map',
+                              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                            ),
+                            Wrap(
+                              spacing: 12,
+                              runSpacing: 12,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withOpacity(0.5),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: const Color(0xFF2D2D38)),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      _dashboardStyleSegmentBtn(MapStyle.dark, 'Dark'),
+                                      _dashboardStyleSegmentBtn(MapStyle.light, 'Light'),
+                                      _dashboardStyleSegmentBtn(MapStyle.satellite, 'Sat'),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                IconButton(
+                                  icon: const Icon(Icons.fullscreen, color: Colors.tealAccent, size: 20),
+                                  tooltip: 'View Full Screen Map',
+                                  constraints: const BoxConstraints(),
+                                  padding: EdgeInsets.zero,
+                                  onPressed: () {
+                                    setState(() {
+                                      _activeTab = 1;
+                                    });
+                                  },
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        Expanded(
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Stack(
+                              children: [
+                                _buildDashboardMapPreview(context, state),
+                                Positioned(
+                                  bottom: 16,
+                                  right: 16,
+                                  child: Column(
+                                    children: [
+                                      _buildMapZoomButton(Icons.add, () {
+                                        _dashboardMapController.move(
+                                          _dashboardMapController.camera.center,
+                                          (_dashboardMapController.camera.zoom + 1).clamp(1.0, 22.0),
+                                        );
+                                      }),
+                                      const SizedBox(height: 8),
+                                      _buildMapZoomButton(Icons.remove, () {
+                                        _dashboardMapController.move(
+                                          _dashboardMapController.camera.center,
+                                          (_dashboardMapController.camera.zoom - 1).clamp(1.0, 22.0),
+                                        );
+                                      }),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 24),
+
+                Expanded(
+                  flex: 1,
+                  child: Container(
+                    height: 480,
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E1E26),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFF2D2D38)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Recent Activity',
+                          style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 16),
+                        Expanded(
+                          child: _buildRecentActivityFeed(context, state),
+                        ),
+                        const Divider(color: Color(0xFF2D2D38), height: 24),
+                        Center(
+                          child: TextButton(
+                            onPressed: () {
+                              setState(() {
+                                _activeTab = 5; // navigate to Attendance Reports
+                              });
+                            },
+                            child: const Text(
+                              'View All',
+                              style: TextStyle(color: Colors.tealAccent, fontSize: 13, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            )
+          else
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Container(
+                  height: 350,
+                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
                     color: const Color(0xFF1E1E26),
                     borderRadius: BorderRadius.circular(16),
@@ -481,29 +684,33 @@ class _DashboardViewState extends State<DashboardView> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text(
-                            'Live Workers on Map',
-                            style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                          ),
-                          Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(2),
-                                decoration: BoxDecoration(
-                                  color: Colors.black.withOpacity(0.5),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: const Color(0xFF2D2D38)),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    _dashboardStyleSegmentBtn(MapStyle.dark, 'Dark'),
-                                    _dashboardStyleSegmentBtn(MapStyle.light, 'Light'),
-                                    _dashboardStyleSegmentBtn(MapStyle.satellite, 'Sat'),
-                                  ],
-                                ),
+                            Expanded(
+                              child: const Text(
+                                'Live Workers on Map',
+                                style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                                overflow: TextOverflow.ellipsis,
                               ),
-                              const SizedBox(width: 12),
+                            ),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withOpacity(0.5),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: const Color(0xFF2D2D38)),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      _dashboardStyleSegmentBtn(MapStyle.dark, 'Dark'),
+                                      _dashboardStyleSegmentBtn(MapStyle.light, 'Light'),
+                                      _dashboardStyleSegmentBtn(MapStyle.satellite, 'Sat'),
+                                    ],
+                                  ),
+                                ),
+                              const SizedBox(width: 8),
                               IconButton(
                                 icon: const Icon(Icons.fullscreen, color: Colors.tealAccent, size: 20),
                                 tooltip: 'View Full Screen Map',
@@ -519,7 +726,7 @@ class _DashboardViewState extends State<DashboardView> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 12),
                       Expanded(
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(12),
@@ -527,8 +734,8 @@ class _DashboardViewState extends State<DashboardView> {
                             children: [
                               _buildDashboardMapPreview(context, state),
                               Positioned(
-                                bottom: 16,
-                                right: 16,
+                                bottom: 12,
+                                right: 12,
                                 child: Column(
                                   children: [
                                     _buildMapZoomButton(Icons.add, () {
@@ -537,7 +744,7 @@ class _DashboardViewState extends State<DashboardView> {
                                         (_dashboardMapController.camera.zoom + 1).clamp(1.0, 22.0),
                                       );
                                     }),
-                                    const SizedBox(height: 8),
+                                    const SizedBox(height: 6),
                                     _buildMapZoomButton(Icons.remove, () {
                                       _dashboardMapController.move(
                                         _dashboardMapController.camera.center,
@@ -554,14 +761,10 @@ class _DashboardViewState extends State<DashboardView> {
                     ],
                   ),
                 ),
-              ),
-              const SizedBox(width: 24),
-
-              Expanded(
-                flex: 1,
-                child: Container(
-                  height: 480,
-                  padding: const EdgeInsets.all(20),
+                const SizedBox(height: 24),
+                Container(
+                  height: 350,
+                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
                     color: const Color(0xFF1E1E26),
                     borderRadius: BorderRadius.circular(16),
@@ -574,11 +777,11 @@ class _DashboardViewState extends State<DashboardView> {
                         'Recent Activity',
                         style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 12),
                       Expanded(
                         child: _buildRecentActivityFeed(context, state),
                       ),
-                      const Divider(color: Color(0xFF2D2D38), height: 24),
+                      const Divider(color: Color(0xFF2D2D38), height: 16),
                       Center(
                         child: TextButton(
                           onPressed: () {
@@ -595,9 +798,8 @@ class _DashboardViewState extends State<DashboardView> {
                     ],
                   ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
         ],
       ),
     );
@@ -1063,7 +1265,13 @@ class _DashboardViewState extends State<DashboardView> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text('Registered Worksites & Camps', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+            const Expanded(
+              child: Text(
+                'Registered Worksites & Camps',
+                style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
             if (state.activeRoleId == 'Admin' || state.activeRoleId == 'Engineer')
               ElevatedButton.icon(
                 onPressed: () => _showAddSiteDialog(context, state),
@@ -1085,49 +1293,52 @@ class _DashboardViewState extends State<DashboardView> {
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 child: Padding(
                   padding: const EdgeInsets.all(16),
-                  child: Row(
+                  child: Column(
                     children: [
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: s.isAccommodation ? Colors.blue.withOpacity(0.1) : Colors.teal.withOpacity(0.1),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          s.isAccommodation ? Icons.home_work_outlined : Icons.business,
-                          color: s.isAccommodation ? Colors.blue : Colors.tealAccent,
-                        ),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: s.isAccommodation ? Colors.blue.withOpacity(0.1) : Colors.teal.withOpacity(0.1),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              s.isAccommodation ? Icons.home_work_outlined : Icons.business,
+                              color: s.isAccommodation ? Colors.blue : Colors.tealAccent,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(s.name, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+                                const SizedBox(height: 4),
+                                Text('Code: ${s.code} • Frequency: ${s.frequency.name}', style: const TextStyle(color: Colors.grey, fontSize: 11)),
+                                const SizedBox(height: 2),
+                                Text('Location: ${s.latitude.toStringAsFixed(4)}, ${s.longitude.toStringAsFixed(4)}', style: const TextStyle(color: Colors.grey, fontSize: 11)),
+                                const SizedBox(height: 2),
+                                Text('Address: ${s.address}', style: const TextStyle(color: Colors.grey, fontSize: 11)),
+                                const SizedBox(height: 4),
+                                Text('Category: ${s.category.name} / ${s.subCategory.name}', style: const TextStyle(color: Colors.grey, fontSize: 10)),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(s.name, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
-                            const SizedBox(height: 4),
-                            Text('Code: ${s.code} • Frequency: ${s.frequency.name} • Location: ${s.latitude}, ${s.longitude}', style: const TextStyle(color: Colors.grey, fontSize: 11)),
-                            const SizedBox(height: 2),
-                            Text('Address: ${s.address}', style: const TextStyle(color: Colors.grey, fontSize: 11)),
-                          ],
-                        ),
-                      ),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
                         children: [
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                             decoration: BoxDecoration(color: const Color(0xFF13131A), borderRadius: BorderRadius.circular(6)),
                             child: Text('Radius: ${s.radius.toInt()}m', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
                           ),
-                          const SizedBox(height: 6),
-                          Text('Category: ${s.category.name} / ${s.subCategory.name}', style: const TextStyle(color: Colors.grey, fontSize: 10)),
-                        ],
-                      ),
-                      if (state.activeRoleId == 'Admin' || state.activeRoleId == 'Engineer') ...[
-                        const SizedBox(width: 16),
-                        Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
+                          const Spacer(),
+                          if (state.activeRoleId == 'Admin' || state.activeRoleId == 'Engineer') ...[
                             IconButton(
                               icon: const Icon(Icons.edit, color: Colors.tealAccent, size: 20),
                               tooltip: 'Edit Site',
@@ -1139,8 +1350,8 @@ class _DashboardViewState extends State<DashboardView> {
                               onPressed: () => _showDeleteConfirmation(context, state, s),
                             ),
                           ],
-                        ),
-                      ],
+                        ],
+                      ),
                     ],
                   ),
                 ),
@@ -1224,7 +1435,13 @@ class _DashboardViewState extends State<DashboardView> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text('Employee Roster & Document Registry', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+            const Expanded(
+              child: Text(
+                'Employee Roster & Document Registry',
+                style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
             if (state.activeRoleId == 'Admin' || state.activeRoleId == 'Engineer')
               ElevatedButton.icon(
                 onPressed: () => _showAddWorkerDialog(context, state),
@@ -1273,10 +1490,11 @@ class _DashboardViewState extends State<DashboardView> {
                   child: Column(
                     children: [
                       Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Container(
                             padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(color: const Color(0xFF13131A), shape: BoxShape.circle),
+                            decoration: const BoxDecoration(color: Color(0xFF13131A), shape: BoxShape.circle),
                             child: const Icon(Icons.person, color: Colors.tealAccent),
                           ),
                           const SizedBox(width: 16),
@@ -1292,31 +1510,26 @@ class _DashboardViewState extends State<DashboardView> {
                               ],
                             ),
                           ),
-                          // Select worker context for simulation helper and delete option
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              TextButton.icon(
-                                onPressed: () => state.setSelectedWorker(w.id),
-                                icon: Icon(Icons.touch_app, size: 14, color: state.selectedWorkerId == w.id ? Colors.tealAccent : Colors.grey),
-                                label: Text(
-                                  state.selectedWorkerId == w.id ? 'Active Focus' : 'Focus for Simulator',
-                                  style: TextStyle(fontSize: 10, color: state.selectedWorkerId == w.id ? Colors.tealAccent : Colors.grey, fontWeight: FontWeight.bold),
-                                ),
-                                style: TextButton.styleFrom(
-                                  backgroundColor: state.selectedWorkerId == w.id ? Colors.teal.withOpacity(0.1) : Colors.transparent,
-                                ),
-                              ),
-                              if (state.activeRoleId == 'Admin' || state.activeRoleId == 'Engineer') ...[
-                                const SizedBox(width: 8),
-                                IconButton(
-                                  icon: const Icon(Icons.delete, color: Colors.redAccent, size: 20),
-                                  tooltip: 'Delete Worker',
-                                  onPressed: () => _showDeleteWorkerConfirmation(context, state, w),
-                                ),
-                              ],
-                            ],
-                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      // Select worker context for simulation helper and delete option
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          if (state.activeRoleId == 'Admin' || state.activeRoleId == 'Engineer')
+                            TextButton.icon(
+                              onPressed: () => state.setSelectedWorker(w.id),
+                              icon: Icon(Icons.touch_app, size: 14, color: state.selectedWorkerId == w.id ? Colors.tealAccent : Colors.grey),
+                              label: Text('Focus for Simulator', style: TextStyle(color: state.selectedWorkerId == w.id ? Colors.tealAccent : Colors.grey, fontSize: 11)),
+                            ),
+                          const Spacer(),
+                          if (state.activeRoleId == 'Admin' || state.activeRoleId == 'Engineer')
+                            IconButton(
+                              icon: const Icon(Icons.delete, color: Colors.redAccent, size: 20),
+                              tooltip: 'Delete Worker',
+                              onPressed: () => _showDeleteWorkerConfirmation(context, state, w),
+                            ),
                         ],
                       ),
                       const Divider(color: Color(0xFF2D2D38), height: 20),
@@ -1440,24 +1653,36 @@ class _DashboardViewState extends State<DashboardView> {
                       decoration: const InputDecoration(labelText: 'Phone', labelStyle: TextStyle(color: Colors.grey)),
                     ),
                     const SizedBox(height: 12),
-                    Row(
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        const Text('Staff Type: ', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                        DropdownButton<StaffType>(
-                          value: selectedStaffType,
-                          dropdownColor: const Color(0xFF1E1E26),
-                          style: const TextStyle(color: Colors.white),
-                          onChanged: (val) => setDialogState(() => selectedStaffType = val!),
-                          items: StaffType.values.map((t) => DropdownMenuItem(value: t, child: Text(t.name))).toList(),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text('Staff Type: ', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                            DropdownButton<StaffType>(
+                              value: selectedStaffType,
+                              dropdownColor: const Color(0xFF1E1E26),
+                              style: const TextStyle(color: Colors.white),
+                              onChanged: (val) => setDialogState(() => selectedStaffType = val!),
+                              items: StaffType.values.map((t) => DropdownMenuItem(value: t, child: Text(t.name))).toList(),
+                            ),
+                          ],
                         ),
-                        const Spacer(),
-                        const Text('Category: ', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                        DropdownButton<StaffCategory>(
-                          value: selectedStaffCategory,
-                          dropdownColor: const Color(0xFF1E1E26),
-                          style: const TextStyle(color: Colors.white),
-                          onChanged: (val) => setDialogState(() => selectedStaffCategory = val!),
-                          items: StaffCategory.values.map((c) => DropdownMenuItem(value: c, child: Text(c.name))).toList(),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text('Category: ', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                            DropdownButton<StaffCategory>(
+                              value: selectedStaffCategory,
+                              dropdownColor: const Color(0xFF1E1E26),
+                              style: const TextStyle(color: Colors.white),
+                              onChanged: (val) => setDialogState(() => selectedStaffCategory = val!),
+                              items: StaffCategory.values.map((c) => DropdownMenuItem(value: c, child: Text(c.name))).toList(),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -1475,6 +1700,12 @@ class _DashboardViewState extends State<DashboardView> {
                       controller: userController,
                       style: const TextStyle(color: Colors.white),
                       decoration: const InputDecoration(labelText: 'Username', labelStyle: TextStyle(color: Colors.grey)),
+                    ),
+                    TextField(
+                      controller: passController,
+                      style: const TextStyle(color: Colors.white),
+                      obscureText: true,
+                      decoration: const InputDecoration(labelText: 'Password', labelStyle: TextStyle(color: Colors.grey)),
                     ),
                     TextField(
                       controller: emiratesController,
@@ -1626,7 +1857,7 @@ class _DashboardViewState extends State<DashboardView> {
                                               children: [
                                                 Expanded(
                                                   child: Text(
-                                                    site.code,
+                                                    site.name,
                                                     style: const TextStyle(color: Colors.tealAccent, fontSize: 9, fontWeight: FontWeight.bold),
                                                     overflow: TextOverflow.ellipsis,
                                                     textAlign: TextAlign.center,
@@ -1635,7 +1866,7 @@ class _DashboardViewState extends State<DashboardView> {
                                                 IconButton(
                                                   padding: EdgeInsets.zero,
                                                   constraints: const BoxConstraints(),
-                                                  icon: const Icon(Icons.close, color: Colors.redAccent, size: 8),
+                                                  icon: const Icon(Icons.close, color: Colors.redAccent, size: 12),
                                                   onPressed: () {
                                                     state.removeAssignment(a.id);
                                                   },
@@ -2211,6 +2442,65 @@ class _DashboardViewState extends State<DashboardView> {
       ),
     );
   }
+
+  Widget _buildFloatingNotifications(BuildContext context, TrackerState state) {
+    final list = state.activeNotifications.where((n) => n.title.contains('Security Alert') || n.title.contains('Tampering')).toList();
+    if (list.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: list.map((n) {
+        return Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E1E26),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.redAccent.withOpacity(0.5)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.5),
+                blurRadius: 10,
+                spreadRadius: 2,
+              )
+            ],
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.warning, color: Colors.redAccent, size: 20),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      n.title,
+                      style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      n.message,
+                      style: const TextStyle(color: Colors.grey, fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                icon: const Icon(Icons.close, color: Colors.grey, size: 14),
+                onPressed: () {
+                  state.markNotificationAsRead(n.id);
+                },
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2249,7 +2539,7 @@ class _AddSiteDialogState extends State<_AddSiteDialog> {
   String _fenceColor = '#00BFA5';
 
   // ── Map style & device location ─────────────────────────────────────────────
-  MapStyle _mapStyle = MapStyle.dark;
+  MapStyle _mapStyle = MapStyle.satellite;
   LatLng? _deviceLocation;
   bool _isLocating = false;
 
@@ -2433,30 +2723,110 @@ class _AddSiteDialogState extends State<_AddSiteDialog> {
       isAccommodation: _isAcc,
     );
 
-    if (widget.site != null) {
-      // Edit mode: save to backend PostgreSQL
-      await widget.state.editSiteInBackend(siteObj, geofence);
-    } else {
-      // Add mode: save to backend PostgreSQL
-      final mapSvc = context.read<MapService>();
-      await mapSvc.createGeofence(geofence);
-      await widget.state.fetchGeofencesFromBackend();
-    }
+    // Pre-capture values before async gaps to avoid "unmounted state/context" errors
+    final TrackerState localState = widget.state;
+    final Site? localSite = widget.site;
+    final NavigatorState navigator = Navigator.of(context);
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    final MapService localMapSvc = context.read<MapService>();
 
-    // Refresh MapService geofences (for maps)
-    final mapSvc = context.read<MapService>();
-    await mapSvc.fetchGeofences();
+    try {
+      if (localSite != null) {
+        // Edit mode: save to backend PostgreSQL
+        final success = await localState.editSiteInBackend(siteObj, geofence).timeout(const Duration(seconds: 2));
+        if (!success) {
+          throw Exception("Backend edit returned false");
+        }
+      } else {
+        // Add mode: save to backend PostgreSQL
+        final created = await localMapSvc.createGeofence(geofence).timeout(const Duration(seconds: 2));
+        if (created == null) {
+          throw Exception("Backend create returned null");
+        }
+        await localState.fetchGeofencesFromBackend().timeout(const Duration(seconds: 2));
+      }
+
+      // Refresh MapService geofences (for maps)
+      await localMapSvc.fetchGeofences().timeout(const Duration(seconds: 2));
+    } catch (e) {
+      debugPrint('[AddSiteDialog] Backend save failed, saving locally: $e');
+      localState.saveSiteLocally(siteObj, geofence);
+
+      // Notify user about local fallback
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('⚠️ Backend database offline. Saved locally.'),
+          backgroundColor: Colors.orangeAccent,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
 
     if (mounted) {
       setState(() => _isSaving = false);
-      Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(widget.site != null
-              ? '✅ Site "${_nameCtrl.text.trim()}" updated successfully!'
-              : '✅ Site "${_nameCtrl.text.trim()}" and geofence saved successfully!'),
-          backgroundColor: const Color(0xFF00BFA5),
+    }
+
+    // Safely close dialog and notify success
+    navigator.pop();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(localSite != null
+            ? '✅ Site "${siteObj.name}" updated successfully!'
+            : '✅ Site "${siteObj.name}" and geofence saved successfully!'),
+        backgroundColor: const Color(0xFF00BFA5),
+      ),
+    );
+  }
+
+  Widget _buildFooterStatusBadge(bool isMobile) {
+    if (_fenceShape == GeofenceShape.circle && _circleCenter != null) {
+      return Container(
+        padding: EdgeInsets.symmetric(horizontal: isMobile ? 8 : 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: _hexToColor(_fenceColor).withOpacity(0.1),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: _hexToColor(_fenceColor).withOpacity(0.4)),
         ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.radio_button_checked, color: _hexToColor(_fenceColor), size: 13),
+            if (!isMobile) ...[
+              const SizedBox(width: 6),
+              Text(
+                'Circle • ${_circleRadius.toInt()}m radius',
+                style: TextStyle(color: _hexToColor(_fenceColor), fontSize: 11, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ],
+        ),
+      );
+    } else if (_fenceShape == GeofenceShape.polygon && _polygonPoints.isNotEmpty) {
+      return Container(
+        padding: EdgeInsets.symmetric(horizontal: isMobile ? 8 : 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: _hexToColor(_fenceColor).withOpacity(0.1),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: _hexToColor(_fenceColor).withOpacity(0.4)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.pentagon_outlined, color: _hexToColor(_fenceColor), size: 13),
+            if (!isMobile) ...[
+              const SizedBox(width: 6),
+              Text(
+                'Polygon • ${_polygonPoints.length} pts',
+                style: TextStyle(color: _hexToColor(_fenceColor), fontSize: 11, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ],
+        ),
+      );
+    } else {
+      return Text(
+        isMobile ? '⚠️ Empty' : '⚠️  No geofence drawn yet',
+        style: const TextStyle(color: Colors.orange, fontSize: 11),
       );
     }
   }
@@ -2464,13 +2834,18 @@ class _AddSiteDialogState extends State<_AddSiteDialog> {
   @override
   Widget build(BuildContext context) {
     final fenceColor = _hexToColor(_fenceColor);
+    final isMobile = MediaQuery.of(context).size.width < 700;
+    final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
 
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.all(24),
+      insetPadding: EdgeInsets.all(isMobile ? 12 : 24),
       child: Container(
         width: double.infinity,
-        height: MediaQuery.of(context).size.height * 0.9,
+        height: isMobile
+            ? (MediaQuery.of(context).size.height - MediaQuery.of(context).viewInsets.bottom - 40)
+                .clamp(200.0, MediaQuery.of(context).size.height * 0.9)
+            : MediaQuery.of(context).size.height * 0.9,
         decoration: BoxDecoration(
           color: const Color(0xFF13131A),
           borderRadius: BorderRadius.circular(20),
@@ -2487,7 +2862,7 @@ class _AddSiteDialogState extends State<_AddSiteDialog> {
           children: [
             // ── Header ─────────────────────────────────────────────────────────
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+              padding: EdgeInsets.symmetric(horizontal: isMobile ? 16 : 24, vertical: 16),
               decoration: const BoxDecoration(
                 color: Color(0xFF1E1E26),
                 borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -2502,15 +2877,24 @@ class _AddSiteDialogState extends State<_AddSiteDialog> {
                     ),
                     child: Icon(widget.site != null ? Icons.edit_location_alt : Icons.add_location_alt, color: const Color(0xFF00BFA5), size: 22),
                   ),
-                  const SizedBox(width: 14),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(widget.site != null ? 'Edit Worksite' : 'Add New Worksite', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                      Text(widget.site != null ? 'Modify site details and adjust geofence' : 'Fill site details and mark the geofence on the map', style: const TextStyle(color: Colors.grey, fontSize: 12)),
-                    ],
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.site != null ? 'Edit Worksite' : 'Add New Worksite',
+                          style: TextStyle(color: Colors.white, fontSize: isMobile ? 15 : 18, fontWeight: FontWeight.bold),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          widget.site != null ? 'Modify site details and adjust geofence' : 'Fill site details and mark the geofence on the map',
+                          style: TextStyle(color: Colors.grey, fontSize: isMobile ? 10 : 12),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
                   ),
-                  const Spacer(),
                   IconButton(
                     onPressed: () => Navigator.pop(context),
                     icon: const Icon(Icons.close, color: Colors.grey),
@@ -2519,109 +2903,123 @@ class _AddSiteDialogState extends State<_AddSiteDialog> {
               ),
             ),
 
-            // ── Body: Left form + Right map ─────────────────────────────────────
+            // ── Body: Left form + Right map (Desktop) or Vertical Stack (Mobile) ──
             Expanded(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // ── LEFT: Site Details Form ──────────────────────────────────
-                  SizedBox(
-                    width: 340,
-                    child: Container(
-                      decoration: const BoxDecoration(
-                        border: Border(right: BorderSide(color: Color(0xFF2D2D38))),
+              child: isMobile
+                  ? SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: _buildFormPanel(),
+                          ),
+                          const Divider(color: Color(0xFF2D2D38), height: 1),
+                          SizedBox(
+                            height: keyboardOpen ? 120 : 280,
+                            child: _buildMapPanel(fenceColor),
+                          ),
+                        ],
                       ),
-                      child: SingleChildScrollView(
-                        padding: const EdgeInsets.all(20),
-                        child: _buildFormPanel(),
-                      ),
-                    ),
-                  ),
+                    )
+                  : Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // ── LEFT: Site Details Form ──────────────────────────────────
+                        SizedBox(
+                          width: 340,
+                          child: Container(
+                            decoration: const BoxDecoration(
+                              border: Border(right: BorderSide(color: Color(0xFF2D2D38))),
+                            ),
+                            child: SingleChildScrollView(
+                              padding: const EdgeInsets.all(20),
+                              child: _buildFormPanel(),
+                            ),
+                          ),
+                        ),
 
-                  // ── RIGHT: Interactive Map ────────────────────────────────────
-                  Expanded(
-                    child: _buildMapPanel(fenceColor),
-                  ),
-                ],
-              ),
+                        // ── RIGHT: Interactive Map ────────────────────────────────────
+                        Expanded(
+                          child: _buildMapPanel(fenceColor),
+                        ),
+                      ],
+                    ),
             ),
 
             // ── Footer: Actions ─────────────────────────────────────────────────
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+              padding: EdgeInsets.symmetric(
+                horizontal: isMobile ? 12 : 24,
+                vertical: (isMobile && keyboardOpen) ? 6 : 14,
+              ),
               decoration: const BoxDecoration(
                 color: Color(0xFF1E1E26),
                 borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
                 border: Border(top: BorderSide(color: Color(0xFF2D2D38))),
               ),
-              child: Row(
-                children: [
-                  // Geofence summary chip
-                  if (_fenceShape == GeofenceShape.circle && _circleCenter != null)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: _hexToColor(_fenceColor).withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: _hexToColor(_fenceColor).withOpacity(0.4)),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.radio_button_checked, color: _hexToColor(_fenceColor), size: 13),
-                          const SizedBox(width: 6),
-                          Text(
-                            'Circle • ${_circleRadius.toInt()}m radius',
-                            style: TextStyle(color: _hexToColor(_fenceColor), fontSize: 11, fontWeight: FontWeight.bold),
+              child: isMobile
+                  ? Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (!keyboardOpen) ...[
+                          Center(
+                            child: _buildFooterStatusBadge(isMobile),
                           ),
+                          const SizedBox(height: 10),
                         ],
-                      ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            TextButton(
+                              onPressed: _isSaving ? null : () => Navigator.pop(context),
+                              child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+                            ),
+                            const SizedBox(width: 8),
+                            ElevatedButton.icon(
+                              onPressed: _isSaving ? null : _save,
+                              icon: _isSaving
+                                  ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                                  : const Icon(Icons.save_alt, size: 16),
+                              label: Text(_isSaving ? 'Saving...' : 'Save'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF00BFA5),
+                                foregroundColor: Colors.black,
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     )
-                  else if (_fenceShape == GeofenceShape.polygon && _polygonPoints.isNotEmpty)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: _hexToColor(_fenceColor).withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: _hexToColor(_fenceColor).withOpacity(0.4)),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.pentagon_outlined, color: _hexToColor(_fenceColor), size: 13),
-                          const SizedBox(width: 6),
-                          Text(
-                            'Polygon • ${_polygonPoints.length} pts',
-                            style: TextStyle(color: _hexToColor(_fenceColor), fontSize: 11, fontWeight: FontWeight.bold),
+                  : Row(
+                      children: [
+                        _buildFooterStatusBadge(isMobile),
+                        const Spacer(),
+                        TextButton(
+                          onPressed: _isSaving ? null : () => Navigator.pop(context),
+                          child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton.icon(
+                          onPressed: _isSaving ? null : _save,
+                          icon: _isSaving
+                              ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                              : const Icon(Icons.save_alt, size: 16),
+                          label: Text(_isSaving ? 'Saving...' : 'Save Site & Geofence'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF00BFA5),
+                            foregroundColor: Colors.black,
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           ),
-                        ],
-                      ),
-                    )
-                  else
-                    const Text('⚠️  No geofence drawn yet', style: TextStyle(color: Colors.orange, fontSize: 11)),
-
-                  const Spacer(),
-                  TextButton(
-                    onPressed: _isSaving ? null : () => Navigator.pop(context),
-                    child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
-                  ),
-                  const SizedBox(width: 12),
-                  ElevatedButton.icon(
-                    onPressed: _isSaving ? null : _save,
-                    icon: _isSaving
-                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
-                        : const Icon(Icons.save_alt, size: 16),
-                    label: Text(_isSaving ? 'Saving...' : 'Save Site & Geofence'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF00BFA5),
-                      foregroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ],
                     ),
-                  ),
-                ],
-              ),
             ),
+
           ],
         ),
       ),
@@ -2965,7 +3363,7 @@ class _AddSiteDialogState extends State<_AddSiteDialog> {
         );
       case MapStyle.satellite:
         tileLayer = TileLayer(
-          urlTemplate: 'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
+          urlTemplate: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
           userAgentPackageName: 'com.sgs.field_tracker',
           maxNativeZoom: 21,
           maxZoom: 22,
@@ -3095,55 +3493,85 @@ class _AddSiteDialogState extends State<_AddSiteDialog> {
             ],
           ),
 
-          // ── Map Style Switcher (top-right) ────────────────────────────────────
-          Positioned(
-            top: 12,
-            right: 12,
-            child: Container(
-              padding: const EdgeInsets.all(3),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.8),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFF2D2D38)),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _styleBtn(MapStyle.dark, Icons.dark_mode, 'Dark'),
-                  _styleBtn(MapStyle.light, Icons.light_mode, 'Light'),
-                  _styleBtn(MapStyle.satellite, Icons.satellite_alt, 'Sat'),
-                ],
-              ),
-            ),
-          ),
-
-          // ── Drawing instruction hint (top-center) ─────────────────────────────
+          // ── Top Overlays (Search, Instructions, Styles) ─────────────────────
           Positioned(
             top: 12,
             left: 12,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.75),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    _fenceShape == GeofenceShape.circle ? Icons.touch_app : Icons.pentagon_outlined,
-                    color: fenceColor,
-                    size: 13,
+            right: 12,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Search Bar
+                Container(
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.75),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFF2D2D38)),
                   ),
-                  const SizedBox(width: 5),
-                  Text(
-                    _fenceShape == GeofenceShape.circle
-                        ? 'Tap map to set center'
-                        : 'Tap to add boundary points',
-                    style: const TextStyle(color: Colors.white, fontSize: 10),
+                  child: const TextField(
+                    style: TextStyle(color: Colors.white, fontSize: 12),
+                    decoration: InputDecoration(
+                      hintText: 'Search site name or place...',
+                      hintStyle: TextStyle(color: Colors.grey, fontSize: 12),
+                      prefixIcon: Icon(Icons.search, color: Colors.grey, size: 16),
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.symmetric(vertical: 10),
+                    ),
                   ),
-                ],
-              ),
+                ),
+                const SizedBox(height: 8),
+                // Controls Wrap
+                Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: [
+                    // Drawing instruction hint
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.75),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _fenceShape == GeofenceShape.circle ? Icons.touch_app : Icons.pentagon_outlined,
+                            color: fenceColor,
+                            size: 13,
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            _fenceShape == GeofenceShape.circle
+                                ? 'Tap map to set center'
+                                : 'Tap to add points',
+                            style: const TextStyle(color: Colors.white, fontSize: 10),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // Map Style Switcher
+                    Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.8),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFF2D2D38)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _styleBtn(MapStyle.dark, Icons.dark_mode, 'Dark'),
+                          _styleBtn(MapStyle.light, Icons.light_mode, 'Light'),
+                          _styleBtn(MapStyle.satellite, Icons.satellite_alt, 'Sat'),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
 

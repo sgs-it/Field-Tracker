@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'tracker_state.dart';
+import 'models.dart';
 
 class LoginView extends StatefulWidget {
   final VoidCallback onLoginSuccess;
@@ -33,8 +34,11 @@ class _LoginViewState extends State<LoginView> {
       body: Center(
         child: SingleChildScrollView(
           child: Container(
-            width: 420,
-            padding: const EdgeInsets.all(40),
+            width: MediaQuery.of(context).size.width > 460 ? 420 : MediaQuery.of(context).size.width * 0.9,
+            padding: EdgeInsets.symmetric(
+              horizontal: MediaQuery.of(context).size.width > 460 ? 40 : 20,
+              vertical: 40,
+            ),
             decoration: BoxDecoration(
               color: const Color(0xFF1E1E26),
               borderRadius: BorderRadius.circular(24),
@@ -64,13 +68,18 @@ class _LoginViewState extends State<LoginView> {
                       child: const Icon(Icons.track_changes, color: Colors.tealAccent, size: 32),
                     ),
                     const SizedBox(width: 12),
-                    Text(
-                      'SGS FIELD TRACKER',
-                      style: GoogleFonts.outfit(
-                        color: Colors.white,
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1.5,
+                    Flexible(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          'SGS FIELD TRACKER',
+                          style: GoogleFonts.outfit(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1.5,
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -334,6 +343,39 @@ class _LoginViewState extends State<LoginView> {
       final workerList = state.workers.where((w) => w.username == username && w.password == password).toList();
       if (workerList.isNotEmpty) {
         state.setSelectedWorker(workerList.first.id);
+        state.setActiveRole('Worker');
+        widget.onLoginSuccess();
+      } else if (username == 'john' && password == 'password123') {
+        final johns = state.workers.where((w) => w.username == 'john');
+        if (johns.isNotEmpty) {
+          state.setSelectedWorker(johns.first.id);
+        } else {
+          final john = Worker(
+            id: 'demo-john-id',
+            employeeId: 'EMP-999',
+            name: 'John Doe',
+            phone: '+971 50 123 4567',
+            staffType: StaffType.IP,
+            staffCategory: StaffCategory.Direct,
+            leaveCategory: LeaveCategory.Year1,
+            department: 'Field Ops',
+            designation: 'Worker',
+            username: 'john',
+            password: 'password123',
+            staffHierarchy: 'General',
+            isActive: true,
+            emiratesId: '784-1234-1234567-1',
+            emiratesIdExpiry: DateTime.now().add(const Duration(days: 365)),
+            passportNo: 'A1234567',
+            passportExpiry: DateTime.now().add(const Duration(days: 365)),
+            labourCardNo: 'L123456',
+            labourCardExpiry: DateTime.now().add(const Duration(days: 365)),
+            joinedDate: DateTime.now().subtract(const Duration(days: 365)),
+            leaveDueDate: DateTime.now().add(const Duration(days: 30)),
+          );
+          state.addWorker(john);
+          state.setSelectedWorker(john.id);
+        }
         state.setActiveRole('Worker');
         widget.onLoginSuccess();
       } else {

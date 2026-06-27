@@ -50,6 +50,7 @@ class _LiveMapViewState extends State<LiveMapView> {
   bool _showTrails = true;
   bool _isDrawingGeofence = false;
   bool _hasCenteredOnPcLocation = false;
+  bool _isSidebarOpen = false; // defaults to closed on mobile, opens via toggle
   MapStyle _mapStyle = MapStyle.satellite;
   double _currentZoom = 12.0; // tracks live zoom for adaptive geofence rendering
 
@@ -101,22 +102,72 @@ class _LiveMapViewState extends State<LiveMapView> {
       });
     }
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    final isMobile = MediaQuery.of(context).size.width < 700;
+
+    return Stack(
+      fit: StackFit.expand,
       children: [
-        // ── Left: Map ────────────────────────────────────────────────────────
-        Expanded(
-          flex: 3,
-          child: _buildMap(mapSvc, trackerState),
-        ),
+        // ── Map Layer ────────────────────────────────────────────────────────
+        _buildMap(mapSvc, trackerState),
 
-        const SizedBox(width: 16),
+        // ── Desktop Sidebar (Side-by-side) ───────────────────────────────────
+        if (!isMobile)
+          Positioned(
+            top: 16,
+            bottom: 16,
+            right: 16,
+            width: 260,
+            child: Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFF13131A).withOpacity(0.95),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFF2D2D38)),
+              ),
+              child: _buildWorkerSidebar(mapSvc, trackerState),
+            ),
+          ),
 
-        // ── Right: Worker Sidebar ────────────────────────────────────────────
-        SizedBox(
-          width: 260,
-          child: _buildWorkerSidebar(mapSvc, trackerState),
-        ),
+        // ── Mobile Sidebar (Overlay) ─────────────────────────────────────────
+        if (isMobile && _isSidebarOpen)
+          Positioned(
+            top: 16,
+            bottom: 16,
+            left: 16,
+            right: 16,
+            child: Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFF13131A).withOpacity(0.95),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFF2D2D38)),
+                boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 20)],
+              ),
+              child: Column(
+                children: [
+                  Align(
+                    alignment: Alignment.topRight,
+                    child: IconButton(
+                      icon: const Icon(Icons.close, color: Colors.grey),
+                      onPressed: () => setState(() => _isSidebarOpen = false),
+                    ),
+                  ),
+                  Expanded(child: _buildWorkerSidebar(mapSvc, trackerState)),
+                ],
+              ),
+            ),
+          ),
+
+        // ── Mobile Sidebar Toggle Button ─────────────────────────────────────
+        if (isMobile && !_isSidebarOpen)
+          Positioned(
+            bottom: 16,
+            right: 16,
+            child: FloatingActionButton.extended(
+              onPressed: () => setState(() => _isSidebarOpen = true),
+              backgroundColor: const Color(0xFF1E1E26),
+              icon: const Icon(Icons.people_alt, color: Colors.white, size: 20),
+              label: const Text('Workers', style: TextStyle(color: Colors.white)),
+            ),
+          ),
       ],
     );
   }
@@ -140,7 +191,13 @@ class _LiveMapViewState extends State<LiveMapView> {
                 initialCenter: LatLng(trackerState.currentLat, trackerState.currentLng),
                 initialZoom: 12,
                 maxZoom: 22, // Allows satellite tiles to reach full native resolution
-                onTap: _isDrawingGeofence ? _onMapTap : null,
+                onTap: (pos, latlng) {
+                  if (_isDrawingGeofence) {
+                    _onMapTap(pos, latlng);
+                  } else if (_selectedWorkerId != null) {
+                    setState(() => _selectedWorkerId = null);
+                  }
+                },
                 onMapEvent: (event) {
                   // Track zoom so geofence rendering adapts (icon vs full shape)
                   if (event is MapEventMove || event is MapEventScrollWheelZoom ||
@@ -177,10 +234,10 @@ class _LiveMapViewState extends State<LiveMapView> {
                     tileSize: 256,
                   )
                 else if (_mapStyle == MapStyle.satellite)
-                  // Google Satellite: globally available, CORS-friendly, crisp up to zoom 21
+                  // Google Satellite Hybrid (Roads & Labels): globally available, CORS-friendly, crisp up to zoom 21
                   TileLayer(
                     urlTemplate:
-                        'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
+                        'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
                     userAgentPackageName: 'com.sgs.field_tracker',
                     maxNativeZoom: 21,
                     maxZoom: 22,
@@ -203,12 +260,26 @@ class _LiveMapViewState extends State<LiveMapView> {
               ],
             ),
 
-            // ── Top bar: Map controls ─────────────────────────────────────────
+            // ── Top bar: Search & Chips ────────────────────────────────
             Positioned(
               top: 12,
               left: 12,
               right: 12,
-              child: _buildMapControls(mapSvc, trackerState),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _buildSearchBar(),
+                  const SizedBox(height: 8),
+                  _buildTopChips(),
+                ],
+              ),
+            ),
+
+            // ── Right side floating controls ──────────────────────────────
+            Positioned(
+              top: 100,
+              right: 12,
+              child: _buildRightSideControls(mapSvc, trackerState),
             ),
 
             // ── Bottom bar: Connection status ─────────────────────────────────
@@ -456,11 +527,15 @@ class _LiveMapViewState extends State<LiveMapView> {
       final isSelected = _selectedWorkerId == loc.workerId;
       markers.add(Marker(
         point: LatLng(loc.lat, loc.lng),
-        width: isSelected ? 90 : 70,
-        height: isSelected ? 90 : 70,
-        child: GestureDetector(
-          onTap: () => _onWorkerPinTap(loc, trackerState),
-          child: _buildWorkerPin(loc, isSelected, trackerState),
+        width: 70,
+        height: 70,
+        child: OverflowBox(
+          maxWidth: 300,
+          maxHeight: 300,
+          child: GestureDetector(
+            onTap: () => _onWorkerPinTap(loc, trackerState),
+            child: _buildWorkerPin(loc, isSelected, trackerState),
+          ),
         ),
       ));
     }
@@ -477,13 +552,18 @@ class _LiveMapViewState extends State<LiveMapView> {
                       latitude: 25.2048 + (trackerState.workers.indexOf(worker) * 0.005),
                       longitude: 55.2708,
                     ));
+        final isSelected = _selectedWorkerId == worker.id;
         markers.add(Marker(
           point: LatLng(hb.latitude, hb.longitude),
           width: 60,
           height: 60,
-          child: GestureDetector(
-            onTap: () => _onStaticWorkerTap(worker),
-            child: _buildOfflinePin(worker),
+          child: OverflowBox(
+            maxWidth: 300,
+            maxHeight: 300,
+            child: GestureDetector(
+              onTap: () => _onStaticWorkerTap(worker),
+              child: _buildOfflinePin(worker, isSelected),
+            ),
           ),
         ));
       }
@@ -523,6 +603,38 @@ class _LiveMapViewState extends State<LiveMapView> {
     }
 
     return MarkerLayer(markers: markers);
+  }
+
+  Widget _buildPopupCard(Worker worker, String statusStr, Color color) {
+    return Container(
+      width: 220,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E1E26),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.5)),
+        boxShadow: const [
+          BoxShadow(color: Colors.black54, blurRadius: 10, offset: Offset(0, 4)),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(worker.name, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
+          Text('ID: ${worker.employeeId}', style: const TextStyle(color: Colors.grey, fontSize: 11)),
+          Text('Phone: ${worker.phone}', style: const TextStyle(color: Colors.grey, fontSize: 11)),
+          Text('Role: ${worker.designation}', style: const TextStyle(color: Colors.grey, fontSize: 11)),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            decoration: BoxDecoration(color: color.withOpacity(0.2), borderRadius: BorderRadius.circular(4)),
+            child: Text(statusStr, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildWorkerPin(WorkerLocation loc, bool isSelected, TrackerState trackerState) {
@@ -565,227 +677,275 @@ class _LiveMapViewState extends State<LiveMapView> {
         ? (loc.isOnShift ? "On Shift (Present)" : "Pending check-in")
         : "Offline/Absent";
 
-    final tooltipMsg = 'Name: ${worker.name}\n'
-        'Employee ID: ${worker.employeeId}\n'
-        'Phone: ${worker.phone}\n'
-        'Status: $statusStr';
-
-    return Tooltip(
-      message: tooltipMsg,
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E1E26),
-        border: Border.all(color: color, width: 1.5),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      textStyle: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w500),
-      padding: const EdgeInsets.all(10),
-      preferBelow: false,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 300),
-            width: isSelected ? 48 : 38,
-            height: isSelected ? 48 : 38,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: const Color(0xFF1E1E26),
-              border: Border.all(
-                color: color,
-                width: isSelected ? 3.5 : 2.5,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: color.withOpacity(0.4),
-                  blurRadius: isSelected ? 12 : 6,
-                  spreadRadius: isSelected ? 3 : 1,
-                )
-              ],
+    final pinWidget = Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 300),
+          width: isSelected ? 48 : 38,
+          height: isSelected ? 48 : 38,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: const Color(0xFF1E1E26),
+            border: Border.all(
+              color: color,
+              width: isSelected ? 3.5 : 2.5,
             ),
-            child: CircleAvatar(
-              backgroundColor: color.withOpacity(0.15),
-              child: Text(
-                initials,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: isSelected ? 13 : 11,
-                ),
-              ),
-            ),
+            boxShadow: [
+              BoxShadow(
+                color: color.withOpacity(0.4),
+                blurRadius: isSelected ? 12 : 6,
+                spreadRadius: isSelected ? 3 : 1,
+              )
+            ],
           ),
-          const SizedBox(height: 4),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-            decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.85),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: color.withOpacity(0.5), width: 0.5),
-            ),
+          child: CircleAvatar(
+            backgroundColor: color.withOpacity(0.15),
             child: Text(
-              loc.workerName.split(' ').first,
-              style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+              initials,
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: isSelected ? 13 : 11,
+              ),
             ),
           ),
-        ],
-      ),
+        ),
+        const SizedBox(height: 4),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.85),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: color.withOpacity(0.5), width: 0.5),
+          ),
+          child: Text(
+            loc.workerName.split(' ').first,
+            style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+          ),
+        ),
+      ],
+    );
+
+    if (!isSelected) {
+      return pinWidget;
+    }
+
+    return Stack(
+      clipBehavior: Clip.none,
+      alignment: Alignment.center,
+      children: [
+        pinWidget,
+        Positioned(
+          bottom: 75,
+          child: _buildPopupCard(worker, statusStr, color),
+        ),
+      ],
     );
   }
 
-  Widget _buildOfflinePin(Worker worker) {
+  Widget _buildOfflinePin(Worker worker, bool isSelected) {
     final initials = getInitials(worker.name);
     const color = Color(0xFFF44336); // Red for absent / offline/ static fallback
-    final tooltipMsg = 'Name: ${worker.name}\n'
-        'Employee ID: ${worker.employeeId}\n'
-        'Phone: ${worker.phone}\n'
-        'Status: Offline/Absent';
 
-    return Tooltip(
-      message: tooltipMsg,
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E1E26),
-        border: Border.all(color: color, width: 1.5),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      textStyle: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w500),
-      padding: const EdgeInsets.all(10),
-      preferBelow: false,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: const Color(0xFF1E1E26),
-              border: Border.all(
-                color: color,
-                width: 2.5,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: color.withOpacity(0.3),
-                  blurRadius: 6,
-                  spreadRadius: 1,
-                )
-              ],
+    final pinWidget = Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: isSelected ? 48 : 38,
+          height: isSelected ? 48 : 38,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: const Color(0xFF1E1E26),
+            border: Border.all(
+              color: color,
+              width: isSelected ? 3.5 : 2.5,
             ),
-            child: CircleAvatar(
-              backgroundColor: color.withOpacity(0.15),
-              child: Text(
-                initials,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 11,
-                ),
-              ),
-            ),
+            boxShadow: [
+              BoxShadow(
+                color: color.withOpacity(0.3),
+                blurRadius: isSelected ? 12 : 6,
+                spreadRadius: isSelected ? 3 : 1,
+              )
+            ],
           ),
-          const SizedBox(height: 4),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-            decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.85),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: color.withOpacity(0.5), width: 0.5),
-            ),
+          child: CircleAvatar(
+            backgroundColor: color.withOpacity(0.1),
             child: Text(
-              worker.name.split(' ').first,
-              style: const TextStyle(color: Colors.grey, fontSize: 8),
+              initials,
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: isSelected ? 13 : 11,
+              ),
             ),
           ),
-        ],
-      ),
+        ),
+        const SizedBox(height: 4),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.85),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: color.withOpacity(0.5), width: 0.5),
+          ),
+          child: Text(
+            worker.name.split(' ').first,
+            style: const TextStyle(color: Colors.grey, fontSize: 9, fontWeight: FontWeight.bold),
+          ),
+        ),
+      ],
+    );
+
+    if (!isSelected) {
+      return pinWidget;
+    }
+
+    return Stack(
+      clipBehavior: Clip.none,
+      alignment: Alignment.center,
+      children: [
+        pinWidget,
+        Positioned(
+          bottom: 75,
+          child: _buildPopupCard(worker, "Offline/Absent", color),
+        ),
+      ],
     );
   }
 
   // ── Map Controls ────────────────────────────────────────────────────────────
 
-  Widget _buildMapControls(MapService mapSvc, TrackerState trackerState) {
-    return Row(
-      children: [
-        // Title badge
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.8),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: const Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.satellite_alt, color: Color(0xFF00BFA5), size: 13),
-              SizedBox(width: 5),
-              Text('Live Field Map', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
-            ],
-          ),
+  Widget _buildSearchBar() {
+    return Container(
+      height: 40,
+      decoration: BoxDecoration(
+        color: const Color(0xFF13131A).withOpacity(0.9),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFF2D2D38)),
+      ),
+      child: TextField(
+        style: const TextStyle(color: Colors.white, fontSize: 13),
+        decoration: InputDecoration(
+          hintText: 'Search place, worker, or site...',
+          hintStyle: const TextStyle(color: Colors.grey, fontSize: 13),
+          prefixIcon: const Icon(Icons.search, color: Colors.grey, size: 18),
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(vertical: 12),
         ),
-        const SizedBox(width: 6),
-        // All right-side controls in a flexible scrollable row to prevent overflow
-        Flexible(
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
+      ),
+    );
+  }
+
+  Widget _buildTopChips() {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Title badge
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.8),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Toggle: Geofences
-                _mapToggleBtn(
-                  icon: Icons.radio_button_unchecked,
-                  label: 'Fences',
-                  active: _showGeofences,
-                  onTap: () => setState(() => _showGeofences = !_showGeofences),
-                ),
-                const SizedBox(width: 5),
-                // Toggle: Trails
-                _mapToggleBtn(
-                  icon: Icons.timeline,
-                  label: 'Trails',
-                  active: _showTrails,
-                  onTap: () => setState(() => _showTrails = !_showTrails),
-                ),
-
-                const SizedBox(width: 5),
-                // Fit all workers
-                _mapIconBtn(
-                  icon: Icons.fit_screen,
-                  tooltip: 'Fit all workers',
-                  onTap: () => _fitAllWorkers(mapSvc),
-                ),
-                const SizedBox(width: 5),
-                // Center on my location
-                _mapIconBtn(
-                  icon: Icons.my_location,
-                  tooltip: 'Center on my location',
-                  onTap: () {
-                    _mapController.move(
-                      LatLng(trackerState.currentLat, trackerState.currentLng),
-                      14,
-                    );
-                  },
-                ),
-                const SizedBox(width: 6),
-                // Map Style Segmented Control
-                Container(
-                  padding: const EdgeInsets.all(2),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.75),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFF2D2D38)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _styleSegmentBtn(MapStyle.dark, Icons.dark_mode, 'Dark'),
-                      _styleSegmentBtn(MapStyle.light, Icons.light_mode, 'Light'),
-                      _styleSegmentBtn(MapStyle.satellite, Icons.satellite, 'Sat'),
-                    ],
-                  ),
-                ),
+                Icon(Icons.satellite_alt, color: Color(0xFF00BFA5), size: 13),
+                SizedBox(width: 5),
+                Text('Live Field Map', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
               ],
             ),
           ),
+          const SizedBox(width: 8),
+          // Toggle: Geofences
+          _mapToggleBtn(
+            icon: Icons.radio_button_unchecked,
+            label: 'Fences',
+            active: _showGeofences,
+            onTap: () => setState(() => _showGeofences = !_showGeofences),
+          ),
+          const SizedBox(width: 5),
+          // Toggle: Trails
+          _mapToggleBtn(
+            icon: Icons.timeline,
+            label: 'Trails',
+            active: _showTrails,
+            onTap: () => setState(() => _showTrails = !_showTrails),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRightSideControls(MapService mapSvc, TrackerState trackerState) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        // Map Style Button
+        Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFF13131A).withOpacity(0.9),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFF2D2D38)),
+          ),
+          child: Column(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.layers, color: Colors.grey, size: 20),
+                onPressed: () {
+                  // Toggle map style between satellite and dark
+                  setState(() {
+                    _mapStyle = _mapStyle == MapStyle.satellite ? MapStyle.dark : MapStyle.satellite;
+                  });
+                },
+              ),
+              Text(
+                _mapStyle == MapStyle.satellite ? 'Satellite' : 'Dark',
+                style: const TextStyle(color: Colors.grey, fontSize: 8),
+              ),
+              const SizedBox(height: 4),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        // Fit All Button
+        _mapIconBtn(
+          icon: Icons.fit_screen,
+          tooltip: 'Fit all workers',
+          onTap: () => _fitAllWorkers(mapSvc, trackerState),
+        ),
+        const SizedBox(height: 8),
+        // Center on my location
+        _mapIconBtn(
+          icon: Icons.my_location,
+          tooltip: 'Center on my location',
+          onTap: () {
+            _mapController.move(
+              LatLng(trackerState.currentLat, trackerState.currentLng),
+              14,
+            );
+          },
+        ),
+        const SizedBox(height: 8),
+        // Full Screen Option
+        _mapIconBtn(
+          icon: Navigator.canPop(context) ? Icons.fullscreen_exit : Icons.fullscreen,
+          tooltip: Navigator.canPop(context) ? 'Exit Full Screen' : 'Full Screen',
+          onTap: () {
+            if (Navigator.canPop(context)) {
+              Navigator.pop(context);
+            } else {
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => const Scaffold(
+                  body: LiveMapView(),
+                ),
+              ));
+            }
+          },
         ),
       ],
     );
@@ -1380,13 +1540,24 @@ class _LiveMapViewState extends State<LiveMapView> {
   }
 
   void _onWorkerPinTap(WorkerLocation loc, TrackerState trackerState) {
-    setState(() => _selectedWorkerId = loc.workerId);
-    _mapController.move(LatLng(loc.lat, loc.lng), 15);
-    _showWorkerPopup(loc, trackerState);
+    setState(() {
+      if (_selectedWorkerId == loc.workerId) {
+        _selectedWorkerId = null;
+      } else {
+        _selectedWorkerId = loc.workerId;
+        _mapController.move(LatLng(loc.lat, loc.lng), 15);
+      }
+    });
   }
 
   void _onStaticWorkerTap(Worker worker) {
-    setState(() => _selectedWorkerId = worker.id);
+    setState(() {
+      if (_selectedWorkerId == worker.id) {
+        _selectedWorkerId = null;
+      } else {
+        _selectedWorkerId = worker.id;
+      }
+    });
   }
 
   void _focusWorker(String workerId, WorkerLocation? loc) {
@@ -1396,11 +1567,30 @@ class _LiveMapViewState extends State<LiveMapView> {
     }
   }
 
-  void _fitAllWorkers(MapService mapSvc) {
-    if (mapSvc.workerLocations.isEmpty) return;
-    final points = mapSvc.workerLocations.values
-        .map((l) => LatLng(l.lat, l.lng))
-        .toList();
+  void _fitAllWorkers(MapService mapSvc, TrackerState trackerState) {
+    List<LatLng> points = [];
+
+    // Add live locations
+    points.addAll(mapSvc.workerLocations.values.map((l) => LatLng(l.lat, l.lng)));
+
+    // Add fallback locations for offline workers
+    for (final worker in trackerState.workers) {
+      if (!mapSvc.workerLocations.containsKey(worker.id)) {
+        final hb = trackerState.heartbeatLogs.lastWhere(
+          (h) => h.workerId == worker.id,
+          orElse: () => HeartbeatLog(
+            id: '',
+            workerId: worker.id,
+            timestamp: DateTime.now(),
+            latitude: 25.2048 + (trackerState.workers.indexOf(worker) * 0.005),
+            longitude: 55.2708,
+          ),
+        );
+        points.add(LatLng(hb.latitude, hb.longitude));
+      }
+    }
+
+    if (points.isEmpty) return;
     if (points.length == 1) {
       _mapController.move(points.first, 14);
       return;
@@ -1551,6 +1741,8 @@ class _LiveMapViewState extends State<LiveMapView> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _popupRow(Icons.badge, 'Employee ID', worker.employeeId),
+            _popupRow(Icons.phone, 'Phone', worker.phone),
+            _popupRow(Icons.category, 'Category', '${worker.staffCategory.name} / ${worker.staffType.name}'),
             _popupRow(Icons.work, 'Designation', worker.designation),
             _popupRow(Icons.business, 'Department', worker.department),
             _popupRow(Icons.location_on, 'Coordinates',

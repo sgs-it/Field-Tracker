@@ -10,8 +10,18 @@ import 'worker_location.dart';
 /// The backend server base URL.
 /// Change this to your PC's local IP when testing with real devices on the same WiFi.
 /// Example: 'http://192.168.1.105:8080'
-const String kServerBaseUrl = 'http://localhost:8080';
-const String kWsBaseUrl = 'ws://localhost:8080';
+String get backendHost {
+  if (kIsWeb) {
+    return 'localhost:8080';
+  }
+  if (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS) {
+    return '192.168.0.127:8080';
+  }
+  return 'localhost:8080';
+}
+
+final String kServerBaseUrl = 'http://$backendHost';
+final String kWsBaseUrl = 'ws://$backendHost';
 
 /// MapService connects the admin dashboard to the Go backend.
 /// It manages the admin WebSocket connection, worker locations, geofences,
@@ -42,13 +52,16 @@ class MapService extends ChangeNotifier {
 
   // ── WebSocket ──────────────────────────────────────────────────────────────
 
-  void _connectWebSocket() {
+  Future<void> _connectWebSocket() async {
     _connectionStatus = 'Connecting...';
     notifyListeners();
 
     try {
       final uri = Uri.parse('$kWsBaseUrl/ws?role=admin');
       _channel = WebSocketChannel.connect(uri);
+      
+      // Wait for the connection to be established to catch socket errors
+      await _channel!.ready;
 
       _channel!.stream.listen(
         _onMessage,

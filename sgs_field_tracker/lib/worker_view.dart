@@ -1,8 +1,13 @@
+import 'dart:async';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:geolocator/geolocator.dart';
 import 'tracker_state.dart';
 import 'map_service.dart';
 import 'geofence_model.dart';
@@ -17,6 +22,21 @@ class WorkerView extends StatefulWidget {
 
 class _WorkerViewState extends State<WorkerView> {
   int _currentIndex = 0;
+  Site? _selectedDestinationSite;
+
+  final MapController _mapController = MapController();
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _searchQuery = '';
+  List<Map<String, dynamic>> _placeSuggestions = [];
+  bool _isSearchingPlaces = false;
+  Timer? _debounceTimer;
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    _debounceTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -54,6 +74,10 @@ class _WorkerViewState extends State<WorkerView> {
           // Morning Alarm Overlay (Full-screen alarm)
           if (state.morningAlarmTriggered)
             _buildMorningAlarmOverlay(context, state),
+
+          // End Shift Alarm Overlay (Full-screen alarm)
+          if (state.endShiftAlarmTriggered)
+            _buildEndShiftAlarmOverlay(context, state),
         ],
       ),
       bottomNavigationBar: BottomNavigationBar(
@@ -139,7 +163,8 @@ class _WorkerViewState extends State<WorkerView> {
                   if (state.isFakeGpsEnabled) ...[
                     const SizedBox(width: 8),
                     const Icon(Icons.warning_amber, color: Colors.orangeAccent, size: 16),
-                  ]
+                  ],
+                  const SizedBox(width: 48), // Leave space for the floating logout button
                 ],
               ),
             ],
@@ -147,36 +172,64 @@ class _WorkerViewState extends State<WorkerView> {
           const SizedBox(height: 20),
           // Shift Toggle Button & Status Card
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: const Color(0xFF252530),
               borderRadius: BorderRadius.circular(16),
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            child: Column(
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      shiftTimeText,
-                      style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          shiftTimeText,
+                          style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          att.shiftStart != null
+                              ? 'Start: ${DateFormat('hh:mm a').format(att.shiftStart!)}'
+                              : 'Shift Time Limit: 8h',
+                          style: const TextStyle(color: Colors.grey, fontSize: 12),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      att.shiftStart != null
-                          ? 'Start: ${DateFormat('hh:mm a').format(att.shiftStart!)}'
-                          : 'Shift Time Limit: 8h',
-                      style: const TextStyle(color: Colors.grey, fontSize: 11),
-                    ),
+                    _buildShiftButton(context, state, att),
                   ],
                 ),
-                _buildShiftButton(context, state, att),
+                const SizedBox(height: 16),
+                _buildToggleRow(Icons.notifications, Colors.indigoAccent, 'Morning Shift Alarm (30m before departure)', true),
+                const SizedBox(height: 12),
+                _buildToggleRow(Icons.notifications_active, Colors.orangeAccent, 'End Shift Alarm (30m before departure)', true),
+                const SizedBox(height: 12),
+                _buildToggleRow(Icons.phone_in_talk, Colors.tealAccent, 'Enable Shift Notifications', true),
               ],
             ),
           )
         ],
       ),
+    );
+  }
+
+  Widget _buildToggleRow(IconData icon, Color iconColor, String text, bool value) {
+    return Row(
+      children: [
+        Icon(icon, color: iconColor, size: 20),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(text, style: const TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.w500)),
+        ),
+        Switch(
+          value: value,
+          onChanged: (_) {},
+          activeColor: Colors.tealAccent,
+          activeTrackColor: Colors.tealAccent.withOpacity(0.3),
+        ),
+      ],
     );
   }
 
@@ -188,9 +241,9 @@ class _WorkerViewState extends State<WorkerView> {
           backgroundColor: Colors.greenAccent,
           foregroundColor: Colors.black,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         ),
-        child: const Text('START WORK', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+        child: const Text('START WORK', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
       );
     } else if (att.shiftEnd == null) {
       return ElevatedButton(
@@ -199,9 +252,9 @@ class _WorkerViewState extends State<WorkerView> {
           backgroundColor: Colors.redAccent,
           foregroundColor: Colors.white,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         ),
-        child: const Text('END WORK', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+        child: const Text('END WORK', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
       );
     } else {
       return Container(
@@ -303,6 +356,32 @@ class _WorkerViewState extends State<WorkerView> {
                       const Spacer(),
                       _buildPriorityTag(assign.priority),
                     ],
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () async {
+                        final url = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=${site.latitude},${site.longitude}&travelmode=driving');
+                        try {
+                          await launchUrl(url, mode: LaunchMode.externalApplication);
+                        } catch (e) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Could not launch maps: $e')),
+                            );
+                          }
+                        }
+                      },
+                      icon: const Icon(Icons.directions, color: Colors.black, size: 16),
+                      label: const Text('GET DIRECTIONS (GOOGLE MAPS)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.tealAccent,
+                        foregroundColor: Colors.black,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                    ),
                   ),
                   if (visit.entryTime != null) ...[
                     const SizedBox(height: 8),
@@ -412,27 +491,39 @@ class _WorkerViewState extends State<WorkerView> {
                 child: Stack(
                   children: [
                     FlutterMap(
+                      mapController: _mapController,
                       options: MapOptions(
                         initialCenter: workerPos,
                         initialZoom: 14,
                       ),
                       children: [
                         TileLayer(
-                          urlTemplate: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-                          subdomains: const ['a', 'b', 'c', 'd'],
+                          urlTemplate: 'https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+                          subdomains: const ['0', '1', '2', '3'],
                           userAgentPackageName: 'com.sgs.field_tracker',
                         ),
                         if (polygons.isNotEmpty) PolygonLayer(polygons: polygons),
                         if (circles.isNotEmpty) CircleLayer(circles: circles),
-                        if (myTrail.length >= 2)
-                          PolylineLayer(polylines: [
+                        PolylineLayer(polylines: [
+                          if (myTrail.length >= 2)
                             Polyline(
                               points: myTrail,
                               color: Colors.tealAccent.withOpacity(0.8),
                               strokeWidth: 3,
-                            )
-                          ]),
+                            ),
+                          // Orange direction route line to the selected destination worksite
+                          if (_selectedDestinationSite != null)
+                            Polyline(
+                              points: [
+                                workerPos,
+                                LatLng(_selectedDestinationSite!.latitude, _selectedDestinationSite!.longitude)
+                              ],
+                              color: Colors.orangeAccent,
+                              strokeWidth: 4,
+                            ),
+                        ]),
                         MarkerLayer(markers: [
+                          // Worker's current location pin
                           Marker(
                             point: workerPos,
                             width: 60,
@@ -461,8 +552,79 @@ class _WorkerViewState extends State<WorkerView> {
                               ],
                             ),
                           ),
+                          // Assigned worksite markers
+                          ...state.assignments
+                              .where((a) => a.workerId == state.currentWorker.id)
+                              .map((assign) {
+                                final siteIndex = state.sites.indexWhere((s) => s.id == assign.siteId);
+                                if (siteIndex == -1) return null;
+                                final site = state.sites[siteIndex];
+                                final isSelected = _selectedDestinationSite?.id == site.id;
+                                return Marker(
+                                  point: LatLng(site.latitude, site.longitude),
+                                  width: 60,
+                                  height: 60,
+                                  child: GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onTap: () {
+                                      setState(() {
+                                        _selectedDestinationSite = site;
+                                      });
+                                    },
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.all(4),
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: isSelected ? Colors.tealAccent : const Color(0xFF1E1E26),
+                                            border: Border.all(
+                                              color: isSelected ? Colors.white : Colors.tealAccent,
+                                              width: 2,
+                                            ),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black.withOpacity(0.5),
+                                                blurRadius: 4,
+                                              )
+                                            ],
+                                          ),
+                                          child: Icon(
+                                            site.isAccommodation ? Icons.home_work : Icons.location_on,
+                                            color: isSelected ? Colors.black : Colors.tealAccent,
+                                            size: 18,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                          decoration: BoxDecoration(
+                                            color: Colors.black.withOpacity(0.75),
+                                            borderRadius: BorderRadius.circular(4),
+                                          ),
+                                          child: Text(
+                                            site.code,
+                                            style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              })
+                              .whereType<Marker>()
+                              .toList(),
                         ]),
                       ],
+                    ),
+                    Positioned(
+                      top: 12,
+                      left: 12,
+                      right: 130, // Leave space for status label on the right
+                      child: _buildSearchBar(context, mapSvc, state),
                     ),
                     Positioned(
                       top: 12,
@@ -484,6 +646,101 @@ class _WorkerViewState extends State<WorkerView> {
                         ),
                       ),
                     ),
+                    // Travel directions details overlay card
+                    if (_selectedDestinationSite != null)
+                      Positioned(
+                        bottom: 12,
+                        left: 12,
+                        right: 12,
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1E1E26).withOpacity(0.95),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: Colors.tealAccent.withOpacity(0.3)),
+                            boxShadow: [
+                              BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 10)
+                            ],
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      _selectedDestinationSite!.name,
+                                      style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  IconButton(
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                    icon: const Icon(Icons.close, color: Colors.grey, size: 16),
+                                    onPressed: () {
+                                      setState(() {
+                                        _selectedDestinationSite = null;
+                                      });
+                                    },
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'Code: ${_selectedDestinationSite!.code} • Planned: ${_selectedDestinationSite!.plannedStartTime} - ${_selectedDestinationSite!.plannedEndTime}',
+                                style: const TextStyle(color: Colors.grey, fontSize: 10),
+                              ),
+                              const SizedBox(height: 4),
+                              FutureBuilder<double>(
+                                future: Future.value(Geolocator.distanceBetween(
+                                  state.currentLat,
+                                  state.currentLng,
+                                  _selectedDestinationSite!.latitude,
+                                  _selectedDestinationSite!.longitude,
+                                )),
+                                builder: (context, snapshot) {
+                                  if (!snapshot.hasData) return const SizedBox.shrink();
+                                  final double distM = snapshot.data!;
+                                  final String distStr = distM > 1000
+                                      ? '${(distM / 1000).toStringAsFixed(2)} km'
+                                      : '${distM.toStringAsFixed(0)} meters';
+                                  return Text(
+                                    'Distance: $distStr',
+                                    style: const TextStyle(color: Colors.tealAccent, fontSize: 11, fontWeight: FontWeight.bold),
+                                  );
+                                },
+                              ),
+                              const SizedBox(height: 8),
+                              ElevatedButton.icon(
+                                onPressed: () async {
+                                  final url = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=${_selectedDestinationSite!.latitude},${_selectedDestinationSite!.longitude}&travelmode=driving');
+                                  try {
+                                    await launchUrl(url, mode: LaunchMode.externalApplication);
+                                  } catch (e) {
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text('Could not launch maps: $e')),
+                                      );
+                                    }
+                                  }
+                                },
+                                icon: const Icon(Icons.navigation, size: 14),
+                                label: const Text('Travel in Google Maps', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.tealAccent,
+                                  foregroundColor: Colors.black,
+                                  minimumSize: const Size(double.infinity, 32),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
                   ],
                 ),
               ),
@@ -635,11 +892,12 @@ class _WorkerViewState extends State<WorkerView> {
           builder: (context, setSheetState) {
             return Padding(
               padding: EdgeInsets.fromLTRB(16, 20, 16, MediaQuery.of(context).viewInsets.bottom + 20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Column(
@@ -649,9 +907,30 @@ class _WorkerViewState extends State<WorkerView> {
                           Text('Code: ${site.code} • Priority: ${assign.priority}', style: const TextStyle(color: Colors.grey, fontSize: 11)),
                         ],
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.close, color: Colors.grey),
-                        onPressed: () => Navigator.pop(context),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.directions, color: Color(0xFF00BFA5)),
+                            tooltip: 'Get Directions',
+                            onPressed: () async {
+                              final url = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=${site.latitude},${site.longitude}&travelmode=driving');
+                              try {
+                                await launchUrl(url, mode: LaunchMode.externalApplication);
+                              } catch (e) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Could not launch maps: $e')),
+                                  );
+                                }
+                              }
+                            },
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close, color: Colors.grey),
+                            onPressed: () => Navigator.pop(context),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -764,7 +1043,8 @@ class _WorkerViewState extends State<WorkerView> {
                   ),
                 ],
               ),
-            );
+            ),
+          );
           },
         );
       },
@@ -856,6 +1136,301 @@ class _WorkerViewState extends State<WorkerView> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  // ─── Search bar (overlaid on map) ────────────────────────────────────────
+
+  void _onSearchChanged(String query) {
+    _debounceTimer?.cancel();
+    if (query.trim().length < 3) {
+      setState(() {
+        _placeSuggestions.clear();
+      });
+      return;
+    }
+    _debounceTimer = Timer(const Duration(milliseconds: 600), () {
+      _searchPlaces(query.trim());
+    });
+  }
+
+  Future<void> _searchPlaces(String query) async {
+    if (!mounted) return;
+    setState(() => _isSearchingPlaces = true);
+    try {
+      final url = Uri.parse(
+        'https://nominatim.openstreetmap.org/search?q=${Uri.encodeComponent(query)}&format=json&limit=5',
+      );
+      final response = await http.get(url, headers: {'User-Agent': 'com.sgs.field_tracker'});
+      if (response.statusCode == 200) {
+        final List<dynamic> data = jsonDecode(response.body);
+        if (mounted) {
+          setState(() {
+            _placeSuggestions = data.map((item) => {
+              'display_name': item['display_name'] as String,
+              'lat': double.parse(item['lat'] as String),
+              'lon': double.parse(item['lon'] as String),
+            }).toList();
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Nominatim geocoding error: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isSearchingPlaces = false);
+      }
+    }
+  }
+
+  Widget _buildSearchBar(BuildContext context, MapService mapSvc, TrackerState state) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E1E26).withOpacity(0.95),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFF2D2D38)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.4),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: TextField(
+            controller: _searchCtrl,
+            style: const TextStyle(color: Colors.white, fontSize: 13),
+            decoration: InputDecoration(
+              hintText: 'Search site or location...',
+              hintStyle: const TextStyle(color: Colors.grey, fontSize: 12),
+              prefixIcon: const Icon(Icons.search, color: Colors.tealAccent, size: 18),
+              suffixIcon: _searchQuery.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear, color: Colors.grey, size: 16),
+                      onPressed: () {
+                        setState(() {
+                          _searchCtrl.clear();
+                          _searchQuery = '';
+                          _placeSuggestions.clear();
+                        });
+                      },
+                    )
+                  : null,
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(vertical: 12),
+            ),
+            onChanged: (val) {
+              setState(() {
+                _searchQuery = val;
+              });
+              _onSearchChanged(val);
+            },
+          ),
+        ),
+        if (_searchQuery.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Container(
+            constraints: const BoxConstraints(maxHeight: 200),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E1E26).withOpacity(0.95),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFF2D2D38)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.4),
+                  blurRadius: 8,
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _buildSiteSuggestions(mapSvc),
+                    _buildPlaceSuggestions(),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildSiteSuggestions(MapService mapSvc) {
+    final query = _searchQuery.toLowerCase();
+    final matchingFences = mapSvc.geofences.where((g) =>
+        g.name.toLowerCase().contains(query) ||
+        g.code.toLowerCase().contains(query)).toList();
+
+    if (matchingFences.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          color: const Color(0xFF13131A),
+          child: const Text('ASSIGNED SITES', style: TextStyle(color: Colors.tealAccent, fontSize: 9, fontWeight: FontWeight.bold)),
+        ),
+        ...matchingFences.map((g) {
+          LatLng? dest;
+          if (g.type == GeofenceShape.circle && g.center != null) {
+            dest = g.center;
+          } else if (g.type == GeofenceShape.polygon && g.polygon != null && g.polygon!.isNotEmpty) {
+            dest = g.polygon!.first;
+          }
+          return ListTile(
+            dense: true,
+            visualDensity: VisualDensity.compact,
+            title: Text(g.name, style: const TextStyle(color: Colors.white, fontSize: 12)),
+            subtitle: Text('Code: ${g.code} • ${g.type.name}', style: const TextStyle(color: Colors.grey, fontSize: 10)),
+            leading: const Icon(Icons.location_on, color: Colors.tealAccent, size: 16),
+            onTap: () {
+              if (dest != null) {
+                _mapController.move(dest, 15);
+              }
+              setState(() {
+                _searchCtrl.clear();
+                _searchQuery = '';
+                _placeSuggestions.clear();
+              });
+            },
+          );
+        }),
+      ],
+    );
+  }
+
+  Widget _buildPlaceSuggestions() {
+    if (_isSearchingPlaces) {
+      return const Padding(
+        padding: EdgeInsets.all(8.0),
+        child: Center(
+          child: SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.tealAccent),
+          ),
+        ),
+      );
+    }
+
+    if (_placeSuggestions.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          color: const Color(0xFF13131A),
+          child: const Text('GLOBAL LOCATIONS', style: TextStyle(color: Colors.blueAccent, fontSize: 9, fontWeight: FontWeight.bold)),
+        ),
+        ..._placeSuggestions.map((p) {
+          final String name = p['display_name'] as String;
+          final double lat = p['lat'] as double;
+          final double lon = p['lon'] as double;
+          return ListTile(
+            dense: true,
+            visualDensity: VisualDensity.compact,
+            title: Text(name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 11)),
+            leading: const Icon(Icons.public, color: Colors.blueAccent, size: 16),
+            onTap: () {
+              _mapController.move(LatLng(lat, lon), 14);
+              setState(() {
+                _searchCtrl.clear();
+                _searchQuery = '';
+                _placeSuggestions.clear();
+              });
+            },
+          );
+        }),
+      ],
+    );
+  }
+
+  // ─── End Shift Alarm Full-Screen Overlay ──────────────────────────────────
+
+  Widget _buildEndShiftAlarmOverlay(BuildContext context, TrackerState state) {
+    return Positioned.fill(
+      child: Container(
+        color: const Color(0xFF0C0C14).withOpacity(0.95),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.alarm, color: Colors.orangeAccent, size: 80),
+            const SizedBox(height: 24),
+            Text(
+              DateFormat('hh:mm a').format(state.simulatedTime),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 48,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'Courier',
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Shift Ending Soon! Please End Your Shift',
+              style: TextStyle(color: Colors.grey, fontSize: 16),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.orange.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.timer, color: Colors.orangeAccent, size: 14),
+                  SizedBox(width: 4),
+                  Text(
+                    'Shift limit or planned work hours reached',
+                    style: TextStyle(color: Colors.orangeAccent, fontSize: 11),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 48),
+            ElevatedButton(
+              onPressed: () {
+                state.triggerEndShiftAlarm(false);
+                state.endShift(state.currentWorker.id);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.redAccent,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 16),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+              ),
+              child: const Text('Dismiss & End Shift', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+            ),
+            const SizedBox(height: 16),
+            TextButton(
+              onPressed: () {
+                state.triggerEndShiftAlarm(false);
+              },
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.grey,
+              ),
+              child: const Text('Keep Working (Overtime)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            ),
+          ],
         ),
       ),
     );

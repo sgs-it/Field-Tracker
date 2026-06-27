@@ -74,6 +74,44 @@ class Site {
       isAccommodation: isAccommodation ?? this.isAccommodation,
     );
   }
+
+  factory Site.fromJson(Map<String, dynamic> json) {
+    return Site(
+      id: json['id'] ?? '',
+      name: json['name'] ?? '',
+      code: json['code'] ?? '',
+      category: JobCategory.values.firstWhere((e) => e.toString() == 'JobCategory.${json['category']}', orElse: () => JobCategory.AMC),
+      subCategory: SubCategory.values.firstWhere((e) => e.toString() == 'SubCategory.${json['subCategory']}', orElse: () => SubCategory.Indoor),
+      jobType: JobType.values.firstWhere((e) => e.toString() == 'JobType.${json['jobType']}', orElse: () => JobType.Permanent),
+      frequency: JobFrequency.values.firstWhere((e) => e.toString() == 'JobFrequency.${json['frequency']}', orElse: () => JobFrequency.Daily),
+      address: json['address'] ?? '',
+      latitude: (json['latitude'] ?? 0).toDouble(),
+      longitude: (json['longitude'] ?? 0).toDouble(),
+      radius: (json['radius'] ?? 0).toDouble(),
+      plannedStartTime: json['plannedStartTime'] ?? '',
+      plannedEndTime: json['plannedEndTime'] ?? '',
+      isAccommodation: json['isAccommodation'] ?? false,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'code': code,
+      'category': category.toString().split('.').last,
+      'subCategory': subCategory.toString().split('.').last,
+      'jobType': jobType.toString().split('.').last,
+      'frequency': frequency.toString().split('.').last,
+      'address': address,
+      'latitude': latitude,
+      'longitude': longitude,
+      'radius': radius,
+      'plannedStartTime': plannedStartTime,
+      'plannedEndTime': plannedEndTime,
+      'isAccommodation': isAccommodation,
+    };
+  }
 }
 
 class Worker {
@@ -207,17 +245,17 @@ class Worker {
       department: json['department'] as String,
       designation: json['designation'] as String,
       username: json['username'] as String,
-      password: json['password'] as String,
-      staffHierarchy: json['staffHierarchy'] as String,
-      isActive: json['isActive'] as bool,
-      emiratesId: json['emiratesId'] as String,
-      emiratesIdExpiry: DateTime.parse(json['emiratesIdExpiry'] as String),
-      passportNo: json['passportNo'] as String,
-      passportExpiry: DateTime.parse(json['passportExpiry'] as String),
-      labourCardNo: json['labourCardNo'] as String,
-      labourCardExpiry: DateTime.parse(json['labourCardExpiry'] as String),
-      joinedDate: DateTime.parse(json['joinedDate'] as String),
-      leaveDueDate: DateTime.parse(json['leaveDueDate'] as String),
+      password: json['password'] as String? ?? 'password123',
+      staffHierarchy: json['staffHierarchy'] as String? ?? 'Default',
+      isActive: json['isActive'] as bool? ?? true,
+      emiratesId: json['emiratesId'] as String? ?? 'N/A',
+      emiratesIdExpiry: json['emiratesIdExpiry'] != null ? DateTime.parse(json['emiratesIdExpiry'] as String) : DateTime.now().add(const Duration(days: 365)),
+      passportNo: json['passportNo'] as String? ?? 'N/A',
+      passportExpiry: json['passportExpiry'] != null ? DateTime.parse(json['passportExpiry'] as String) : DateTime.now().add(const Duration(days: 365)),
+      labourCardNo: json['labourCardNo'] as String? ?? 'N/A',
+      labourCardExpiry: json['labourCardExpiry'] != null ? DateTime.parse(json['labourCardExpiry'] as String) : DateTime.now().add(const Duration(days: 365)),
+      joinedDate: json['joinedDate'] != null ? DateTime.parse(json['joinedDate'] as String) : DateTime.now(),
+      leaveDueDate: json['leaveDueDate'] != null ? DateTime.parse(json['leaveDueDate'] as String) : DateTime.now().add(const Duration(days: 365)),
     );
   }
 }
@@ -241,6 +279,24 @@ class ChecklistItem {
       task: task,
       category: category,
       isCompleted: isCompleted,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'task': task,
+      'category': category,
+      'isCompleted': isCompleted,
+    };
+  }
+
+  factory ChecklistItem.fromJson(Map<String, dynamic> json) {
+    return ChecklistItem(
+      id: json['id'] as String,
+      task: json['task'] as String,
+      category: json['category'] as String,
+      isCompleted: json['isCompleted'] as bool? ?? false,
     );
   }
 }
@@ -288,6 +344,35 @@ class Assignment {
       breakTime: breakTime ?? this.breakTime,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'workerId': workerId,
+      'siteId': siteId,
+      'date': date.toIso8601String(),
+      'shift': shift,
+      'instructions': instructions,
+      'checklist': checklist.map((e) => e.toJson()).toList(),
+      'priority': priority,
+      'breakTime': breakTime,
+    };
+  }
+
+  factory Assignment.fromJson(Map<String, dynamic> json) {
+    var list = json['checklist'] as List? ?? [];
+    return Assignment(
+      id: json['id'] as String,
+      workerId: json['workerId'] as String,
+      siteId: json['siteId'] as String,
+      date: DateTime.parse(json['date'] as String),
+      shift: json['shift'] as String,
+      instructions: json['instructions'] as String,
+      checklist: list.map((e) => ChecklistItem.fromJson(e as Map<String, dynamic>)).toList(),
+      priority: json['priority'] as String,
+      breakTime: json['breakTime'] as String,
+    );
+  }
 }
 
 class VisitRecord {
@@ -320,6 +405,31 @@ class VisitRecord {
       comments: comments,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'siteId': siteId,
+      'entryTime': entryTime?.toIso8601String(),
+      'exitTime': exitTime?.toIso8601String(),
+      'status': status,
+      'checklistAtVisit': checklistAtVisit.map((e) => e.toJson()).toList(),
+      'photoPath': photoPath,
+      'comments': comments,
+    };
+  }
+
+  factory VisitRecord.fromJson(Map<String, dynamic> json) {
+    var list = json['checklistAtVisit'] as List? ?? [];
+    return VisitRecord(
+      siteId: json['siteId'] as String,
+      entryTime: json['entryTime'] != null ? DateTime.parse(json['entryTime'] as String) : null,
+      exitTime: json['exitTime'] != null ? DateTime.parse(json['exitTime'] as String) : null,
+      status: json['status'] as String? ?? 'Pending',
+      checklistAtVisit: list.map((e) => ChecklistItem.fromJson(e as Map<String, dynamic>)).toList(),
+      photoPath: json['photoPath'] as String?,
+      comments: json['comments'] as String?,
+    );
+  }
 }
 
 class AttendanceRecord {
@@ -348,6 +458,39 @@ class AttendanceRecord {
     this.supervisorComments = '',
     this.isApproved = false,
   });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'workerId': workerId,
+      'date': date.toIso8601String(),
+      'shiftStart': shiftStart?.toIso8601String(),
+      'shiftEnd': shiftEnd?.toIso8601String(),
+      'visits': visits.map((e) => e.toJson()).toList(),
+      'overtimeHours': overtimeHours,
+      'normalHours': normalHours,
+      'status': status,
+      'supervisorComments': supervisorComments,
+      'isApproved': isApproved,
+    };
+  }
+
+  factory AttendanceRecord.fromJson(Map<String, dynamic> json) {
+    var list = json['visits'] as List? ?? [];
+    return AttendanceRecord(
+      id: json['id'] as String,
+      workerId: json['workerId'] as String,
+      date: DateTime.parse(json['date'] as String),
+      shiftStart: json['shiftStart'] != null ? DateTime.parse(json['shiftStart'] as String) : null,
+      shiftEnd: json['shiftEnd'] != null ? DateTime.parse(json['shiftEnd'] as String) : null,
+      visits: list.map((e) => VisitRecord.fromJson(e as Map<String, dynamic>)).toList(),
+      overtimeHours: (json['overtimeHours'] as num? ?? 0.0).toDouble(),
+      normalHours: (json['normalHours'] as num? ?? 0.0).toDouble(),
+      status: json['status'] as String? ?? 'Absent',
+      supervisorComments: json['supervisorComments'] as String? ?? '',
+      isApproved: json['isApproved'] as bool? ?? false,
+    );
+  }
 }
 
 class TamperAlert {
@@ -364,6 +507,26 @@ class TamperAlert {
     required this.alertType,
     required this.details,
   });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'workerId': workerId,
+      'timestamp': timestamp.toIso8601String(),
+      'alertType': alertType,
+      'details': details,
+    };
+  }
+
+  factory TamperAlert.fromJson(Map<String, dynamic> json) {
+    return TamperAlert(
+      id: json['id'] as String,
+      workerId: json['workerId'] as String,
+      timestamp: DateTime.parse(json['timestamp'] as String),
+      alertType: json['alertType'] as String,
+      details: json['details'] as String,
+    );
+  }
 }
 
 class HeartbeatLog {
@@ -380,4 +543,68 @@ class HeartbeatLog {
     required this.latitude,
     required this.longitude,
   });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'workerId': workerId,
+      'timestamp': timestamp.toIso8601String(),
+      'latitude': latitude,
+      'longitude': longitude,
+    };
+  }
+
+  factory HeartbeatLog.fromJson(Map<String, dynamic> json) {
+    return HeartbeatLog(
+      id: json['id'] as String,
+      workerId: json['workerId'] as String,
+      timestamp: DateTime.parse(json['timestamp'] as String),
+      latitude: (json['latitude'] as num).toDouble(),
+      longitude: (json['longitude'] as num).toDouble(),
+    );
+  }
+}
+
+class AppNotification {
+  final String id;
+  final String title;
+  final String message;
+  final String targetRole; // 'Admin', 'Supervisor', 'Worker'
+  final String? targetWorkerId;
+  final DateTime timestamp;
+  bool isRead;
+
+  AppNotification({
+    required this.id,
+    required this.title,
+    required this.message,
+    required this.targetRole,
+    this.targetWorkerId,
+    required this.timestamp,
+    this.isRead = false,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'title': title,
+      'message': message,
+      'targetRole': targetRole,
+      'targetWorkerId': targetWorkerId,
+      'timestamp': timestamp.toIso8601String(),
+      'isRead': isRead,
+    };
+  }
+
+  factory AppNotification.fromJson(Map<String, dynamic> json) {
+    return AppNotification(
+      id: json['id'] as String,
+      title: json['title'] as String,
+      message: json['message'] as String,
+      targetRole: json['targetRole'] as String,
+      targetWorkerId: json['targetWorkerId'] as String?,
+      timestamp: DateTime.parse(json['timestamp'] as String),
+      isRead: json['isRead'] as bool? ?? false,
+    );
+  }
 }
