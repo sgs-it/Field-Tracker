@@ -223,13 +223,13 @@ class Worker {
       'staffHierarchy': staffHierarchy,
       'isActive': isActive,
       'emiratesId': emiratesId,
-      'emiratesIdExpiry': emiratesIdExpiry.toIso8601String(),
+      'emiratesIdExpiry': emiratesIdExpiry.toUtc().toIso8601String(),
       'passportNo': passportNo,
-      'passportExpiry': passportExpiry.toIso8601String(),
+      'passportExpiry': passportExpiry.toUtc().toIso8601String(),
       'labourCardNo': labourCardNo,
-      'labourCardExpiry': labourCardExpiry.toIso8601String(),
-      'joinedDate': joinedDate.toIso8601String(),
-      'leaveDueDate': leaveDueDate.toIso8601String(),
+      'labourCardExpiry': labourCardExpiry.toUtc().toIso8601String(),
+      'joinedDate': joinedDate.toUtc().toIso8601String(),
+      'leaveDueDate': leaveDueDate.toUtc().toIso8601String(),
     };
   }
 
@@ -350,7 +350,7 @@ class Assignment {
       'id': id,
       'workerId': workerId,
       'siteId': siteId,
-      'date': date.toIso8601String(),
+      'date': date.toUtc().toIso8601String(),
       'shift': shift,
       'instructions': instructions,
       'checklist': checklist.map((e) => e.toJson()).toList(),
@@ -409,8 +409,8 @@ class VisitRecord {
   Map<String, dynamic> toJson() {
     return {
       'siteId': siteId,
-      'entryTime': entryTime?.toIso8601String(),
-      'exitTime': exitTime?.toIso8601String(),
+      'entryTime': entryTime?.toUtc().toIso8601String(),
+      'exitTime': exitTime?.toUtc().toIso8601String(),
       'status': status,
       'checklistAtVisit': checklistAtVisit.map((e) => e.toJson()).toList(),
       'photoPath': photoPath,
@@ -463,9 +463,9 @@ class AttendanceRecord {
     return {
       'id': id,
       'workerId': workerId,
-      'date': date.toIso8601String(),
-      'shiftStart': shiftStart?.toIso8601String(),
-      'shiftEnd': shiftEnd?.toIso8601String(),
+      'date': date.toUtc().toIso8601String(),
+      'shiftStart': shiftStart?.toUtc().toIso8601String(),
+      'shiftEnd': shiftEnd?.toUtc().toIso8601String(),
       'visits': visits.map((e) => e.toJson()).toList(),
       'overtimeHours': overtimeHours,
       'normalHours': normalHours,
@@ -512,7 +512,7 @@ class TamperAlert {
     return {
       'id': id,
       'workerId': workerId,
-      'timestamp': timestamp.toIso8601String(),
+      'timestamp': timestamp.toUtc().toIso8601String(),
       'alertType': alertType,
       'details': details,
     };
@@ -548,7 +548,7 @@ class HeartbeatLog {
     return {
       'id': id,
       'workerId': workerId,
-      'timestamp': timestamp.toIso8601String(),
+      'timestamp': timestamp.toUtc().toIso8601String(),
       'latitude': latitude,
       'longitude': longitude,
     };
@@ -591,7 +591,7 @@ class AppNotification {
       'message': message,
       'targetRole': targetRole,
       'targetWorkerId': targetWorkerId,
-      'timestamp': timestamp.toIso8601String(),
+      'timestamp': timestamp.toUtc().toIso8601String(),
       'isRead': isRead,
     };
   }
