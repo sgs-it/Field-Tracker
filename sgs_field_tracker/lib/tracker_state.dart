@@ -199,6 +199,9 @@ class TrackerState extends ChangeNotifier {
     _initializeCurrentLocation();
     _geofencePollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       fetchGeofencesFromBackend();
+      fetchWorkersFromBackend();
+      fetchAssignmentsFromBackend();
+      fetchAttendanceRecordsFromBackend();
     });
     notifyListeners();
   }
@@ -509,6 +512,20 @@ class TrackerState extends ChangeNotifier {
       _saveNotificationsToStorage();
       notifyListeners();
     }
+  }
+
+  void addAssignment(Assignment assignment) {
+    _assignments.add(assignment);
+    _saveAssignmentsToStorage();
+    saveAssignmentToBackend(assignment);
+    notifyListeners();
+  }
+
+  void deleteAssignment(String id) {
+    _assignments.removeWhere((a) => a.id == id);
+    _saveAssignmentsToStorage();
+    deleteAssignmentFromBackend(id);
+    notifyListeners();
   }
 
   void clearAllNotifications() {
@@ -840,6 +857,7 @@ class TrackerState extends ChangeNotifier {
   void addWorker(Worker worker) {
     _workers.add(worker);
     _saveWorkersToStorage();
+    saveWorkerToBackend(worker);
     if (_selectedWorkerId == 'no_workers') {
       _selectedWorkerId = worker.id;
     }
@@ -865,6 +883,7 @@ class TrackerState extends ChangeNotifier {
     if (index != -1) {
       _workers[index] = updatedWorker;
       _saveWorkersToStorage();
+      saveWorkerToBackend(updatedWorker);
       addNotification(
         title: 'Profile Updated',
         message: 'Your profile has been updated by the admin.',
@@ -878,6 +897,7 @@ class TrackerState extends ChangeNotifier {
   void deleteWorker(String workerId) {
     _workers.removeWhere((w) => w.id == workerId);
     _saveWorkersToStorage();
+    deleteWorkerFromBackend(workerId);
     if (_selectedWorkerId == workerId) {
       _selectedWorkerId = _workers.isNotEmpty ? _workers.first.id : 'no_workers';
     }
@@ -1651,6 +1671,100 @@ class TrackerState extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('[TrackerState] Geofence fetch error: $e');
+    }
+  }
+
+  Future<void> fetchWorkersFromBackend() async {
+    try {
+      final res = await http.get(Uri.parse('$kServerBaseUrl/api/workers')).timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) {
+        final list = jsonDecode(res.body) as List<dynamic>;
+        _workers = list.map((e) => Worker.fromJson(e as Map<String, dynamic>)).toList();
+        _saveWorkersToStorage();
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('[TrackerState] Workers fetch error: $e');
+    }
+  }
+
+  Future<void> saveWorkerToBackend(Worker w) async {
+    try {
+      await http.post(
+        Uri.parse('$kServerBaseUrl/api/workers'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(w.toJson()),
+      ).timeout(const Duration(seconds: 2));
+    } catch (e) {
+      debugPrint('[TrackerState] Worker save error: $e');
+    }
+  }
+
+  Future<void> deleteWorkerFromBackend(String id) async {
+    try {
+      await http.delete(Uri.parse('$kServerBaseUrl/api/workers/$id')).timeout(const Duration(seconds: 2));
+    } catch (e) {
+      debugPrint('[TrackerState] Worker delete error: $e');
+    }
+  }
+
+  Future<void> fetchAssignmentsFromBackend() async {
+    try {
+      final res = await http.get(Uri.parse('$kServerBaseUrl/api/assignments')).timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) {
+        final list = jsonDecode(res.body) as List<dynamic>;
+        _assignments = list.map((e) => Assignment.fromJson(e as Map<String, dynamic>)).toList();
+        _saveAssignmentsToStorage();
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('[TrackerState] Assignments fetch error: $e');
+    }
+  }
+
+  Future<void> saveAssignmentToBackend(Assignment a) async {
+    try {
+      await http.post(
+        Uri.parse('$kServerBaseUrl/api/assignments'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(a.toJson()),
+      ).timeout(const Duration(seconds: 2));
+    } catch (e) {
+      debugPrint('[TrackerState] Assignment save error: $e');
+    }
+  }
+
+  Future<void> deleteAssignmentFromBackend(String id) async {
+    try {
+      await http.delete(Uri.parse('$kServerBaseUrl/api/assignments/$id')).timeout(const Duration(seconds: 2));
+    } catch (e) {
+      debugPrint('[TrackerState] Assignment delete error: $e');
+    }
+  }
+
+  Future<void> fetchAttendanceRecordsFromBackend() async {
+    try {
+      final res = await http.get(Uri.parse('$kServerBaseUrl/api/attendance')).timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) {
+        final list = jsonDecode(res.body) as List<dynamic>;
+        _attendanceRecords = list.map((e) => AttendanceRecord.fromJson(e as Map<String, dynamic>)).toList();
+        _saveAttendanceRecordsToStorage();
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('[TrackerState] Attendance fetch error: $e');
+    }
+  }
+
+  Future<void> saveAttendanceRecordToBackend(AttendanceRecord a) async {
+    try {
+      await http.post(
+        Uri.parse('$kServerBaseUrl/api/attendance'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(a.toJson()),
+      ).timeout(const Duration(seconds: 2));
+    } catch (e) {
+      debugPrint('[TrackerState] Attendance save error: $e');
     }
   }
 
