@@ -882,13 +882,15 @@ class TrackerState extends ChangeNotifier {
       _selectedWorkerId = worker.id;
     }
     // Initialize empty attendance record for today
-    _attendanceRecords.add(AttendanceRecord(
+    var att = AttendanceRecord(
       id: 'att_${worker.id}_${DateFormat('yyyyMMdd').format(_selectedDate)}',
       workerId: worker.id,
       date: _selectedDate,
       visits: [],
       status: 'Present', // present if no assigned sites
-    ));
+    );
+    _attendanceRecords.add(att);
+    saveAttendanceRecordToBackend(att);
     addNotification(
       title: 'Welcome to SGS Field Tracker',
       message: 'Hello ${worker.name}, your account is active.',
