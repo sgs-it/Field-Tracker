@@ -163,6 +163,9 @@ func RunMigrations() error {
 			longitude   DOUBLE PRECISION NOT NULL,
 			created_at  TIMESTAMPTZ DEFAULT NOW()
 		)`,
+		`ALTER TABLE workers DROP CONSTRAINT IF EXISTS workers_phone_key`,
+		`ALTER TABLE workers DROP CONSTRAINT IF EXISTS workers_employee_id_key`,
+		`ALTER TABLE workers DROP CONSTRAINT IF EXISTS workers_username_key`,
 	}
 
 	for _, m := range migrations {
