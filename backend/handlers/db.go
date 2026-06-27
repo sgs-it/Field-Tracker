@@ -82,6 +82,87 @@ func RunMigrations() error {
 		`ALTER TABLE geofences ADD COLUMN IF NOT EXISTS planned_start_time VARCHAR(50)`,
 		`ALTER TABLE geofences ADD COLUMN IF NOT EXISTS planned_end_time VARCHAR(50)`,
 		`ALTER TABLE geofences ADD COLUMN IF NOT EXISTS is_accommodation BOOLEAN DEFAULT FALSE`,
+
+		// New tables for full db capability
+		`CREATE TABLE IF NOT EXISTS workers (
+			id                 VARCHAR(100) PRIMARY KEY,
+			employee_id         VARCHAR(50) UNIQUE,
+			name               VARCHAR(255) NOT NULL,
+			phone              VARCHAR(50) UNIQUE,
+			staff_type         VARCHAR(20),
+			staff_category     VARCHAR(20),
+			leave_category     VARCHAR(20),
+			department         VARCHAR(100),
+			designation        VARCHAR(100),
+			username           VARCHAR(100) UNIQUE,
+			password           VARCHAR(100),
+			staff_hierarchy    VARCHAR(255),
+			is_active          BOOLEAN DEFAULT TRUE,
+			emirates_id        VARCHAR(100),
+			emirates_id_expiry TIMESTAMPTZ,
+			passport_no        VARCHAR(100),
+			passport_expiry    TIMESTAMPTZ,
+			labour_card_no     VARCHAR(100),
+			labour_card_expiry TIMESTAMPTZ,
+			joined_date        TIMESTAMPTZ,
+			leave_due_date     TIMESTAMPTZ,
+			created_at         TIMESTAMPTZ DEFAULT NOW()
+		)`,
+
+		`CREATE TABLE IF NOT EXISTS users (
+			id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			name        VARCHAR(255) NOT NULL,
+			username    VARCHAR(100) UNIQUE,
+			password    VARCHAR(100) NOT NULL,
+			role        VARCHAR(50) NOT NULL, -- 'Admin', 'Engineer', 'Supervisor'
+			created_at  TIMESTAMPTZ DEFAULT NOW()
+		)`,
+
+		`CREATE TABLE IF NOT EXISTS assignments (
+			id           VARCHAR(100) PRIMARY KEY,
+			worker_id    VARCHAR(100) NOT NULL,
+			site_id      VARCHAR(100) NOT NULL,
+			date         DATE NOT NULL,
+			shift        VARCHAR(100),
+			instructions TEXT,
+			checklist    JSONB,
+			priority     VARCHAR(20),
+			break_time   VARCHAR(100),
+			created_at   TIMESTAMPTZ DEFAULT NOW()
+		)`,
+
+		`CREATE TABLE IF NOT EXISTS attendance (
+			id                  VARCHAR(100) PRIMARY KEY,
+			worker_id           VARCHAR(100) NOT NULL,
+			date                DATE NOT NULL,
+			shift_start         TIMESTAMPTZ,
+			shift_end           TIMESTAMPTZ,
+			visits              JSONB,
+			overtime_hours      DOUBLE PRECISION DEFAULT 0.0,
+			normal_hours        DOUBLE PRECISION DEFAULT 0.0,
+			status              VARCHAR(50) DEFAULT 'Absent',
+			supervisor_comments TEXT,
+			is_approved         BOOLEAN DEFAULT FALSE,
+			created_at          TIMESTAMPTZ DEFAULT NOW()
+		)`,
+
+		`CREATE TABLE IF NOT EXISTS tamper_alerts (
+			id          VARCHAR(100) PRIMARY KEY,
+			worker_id   VARCHAR(100) NOT NULL,
+			timestamp   TIMESTAMPTZ NOT NULL,
+			alert_type  VARCHAR(100) NOT NULL,
+			details     TEXT,
+			created_at  TIMESTAMPTZ DEFAULT NOW()
+		)`,
+
+		`CREATE TABLE IF NOT EXISTS heartbeat_logs (
+			id          VARCHAR(100) PRIMARY KEY,
+			worker_id   VARCHAR(100) NOT NULL,
+			timestamp   TIMESTAMPTZ NOT NULL,
+			latitude    DOUBLE PRECISION NOT NULL,
+			longitude   DOUBLE PRECISION NOT NULL,
+			created_at  TIMESTAMPTZ DEFAULT NOW()
+		)`,
 	}
 
 	for _, m := range migrations {
@@ -90,7 +171,17 @@ func RunMigrations() error {
 		}
 	}
 
-	// Automatic geofence seeding disabled
+	// Seed default users if users table is empty
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
+	if err == nil && count == 0 {
+		_, _ = db.Exec(`
+			INSERT INTO users (name, username, password, role)
+			VALUES 
+				('Administrator', 'admin', 'admin', 'Admin')
+		`)
+		log.Println("✅ Seeded default admin credentials in PostgreSQL")
+	}
 
 	log.Println("✅ Database migrations complete")
 	return nil

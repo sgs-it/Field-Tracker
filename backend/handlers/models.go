@@ -74,3 +74,108 @@ type HeartbeatRequest struct {
 	IsOnShift  bool      `json:"isOnShift"`
 	Timestamp  time.Time `json:"timestamp"`
 }
+
+// User represents a system user (Admin, Engineer, Supervisor)
+type User struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Username  string    `json:"username"`
+	Password  string    `json:"password"`
+	Role      string    `json:"role"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// Worker represents a worker in the system
+type Worker struct {
+	ID                 string    `json:"id"`
+	EmployeeID         string    `json:"employeeId"`
+	Name               string    `json:"name"`
+	Phone              string    `json:"phone"`
+	StaffType          string    `json:"staffType"`
+	StaffCategory      string    `json:"staffCategory"`
+	LeaveCategory      string    `json:"leaveCategory"`
+	Department         string    `json:"department"`
+	Designation        string    `json:"designation"`
+	Username           string    `json:"username"`
+	Password           string    `json:"password"`
+	StaffHierarchy     string    `json:"staffHierarchy"`
+	IsActive           bool      `json:"isActive"`
+	EmiratesID         string    `json:"emiratesId"`
+	EmiratesIDExpiry   time.Time `json:"emiratesIdExpiry"`
+	PassportNo         string    `json:"passportNo"`
+	PassportExpiry     time.Time `json:"passportExpiry"`
+	LabourCardNo       string    `json:"labourCardNo"`
+	LabourCardExpiry   time.Time `json:"labourCardExpiry"`
+	JoinedDate         time.Time `json:"joinedDate"`
+	LeaveDueDate       time.Time `json:"leaveDueDate"`
+	CreatedAt          time.Time `json:"createdAt"`
+}
+
+// ChecklistItem is a checklist task
+type ChecklistItem struct {
+	ID          string `json:"id"`
+	Task        string `json:"task"`
+	Category    string `json:"category"`
+	IsCompleted bool   `json:"isCompleted"`
+}
+
+// Assignment represents a worker site assignment
+type Assignment struct {
+	ID           string          `json:"id"`
+	WorkerID     string          `json:"workerId"`
+	SiteID       string          `json:"siteId"`
+	Date         time.Time       `json:"date"`
+	Shift        string          `json:"shift"`
+	Instructions string          `json:"instructions"`
+	Checklist    []ChecklistItem `json:"checklist"`
+	Priority     string          `json:"priority"`
+	BreakTime    string          `json:"breakTime"`
+	CreatedAt    time.Time       `json:"createdAt"`
+}
+
+// VisitRecord is a record of a geofence site visit
+type VisitRecord struct {
+	SiteID           string          `json:"siteId"`
+	EntryTime        *time.Time      `json:"entryTime,omitempty"`
+	ExitTime         *time.Time      `json:"exitTime,omitempty"`
+	Status           string          `json:"status"`
+	ChecklistAtVisit []ChecklistItem `json:"checklistAtVisit"`
+	PhotoPath        *string         `json:"photoPath,omitempty"`
+	Comments         *string         `json:"comments,omitempty"`
+}
+
+// AttendanceRecord represents a daily attendance record
+type AttendanceRecord struct {
+	ID                 string        `json:"id"`
+	WorkerID           string        `json:"workerId"`
+	Date               time.Time     `json:"date"`
+	ShiftStart         *time.Time    `json:"shiftStart,omitempty"`
+	ShiftEnd           *time.Time    `json:"shiftEnd,omitempty"`
+	Visits             []VisitRecord `json:"visits"`
+	OvertimeHours      float64       `json:"overtimeHours"`
+	NormalHours        float64       `json:"normalHours"`
+	Status             string        `json:"status"`
+	SupervisorComments string        `json:"supervisorComments"`
+	IsApproved         bool          `json:"isApproved"`
+	CreatedAt          time.Time     `json:"createdAt"`
+}
+
+// TamperAlert represents a GPS or internet tampering alert
+type TamperAlert struct {
+	ID        string    `json:"id"`
+	WorkerID  string    `json:"workerId"`
+	Timestamp time.Time `json:"timestamp"`
+	AlertType string    `json:"alertType"`
+	Details   string    `json:"details"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// HeartbeatLog represents a heartbeat log
+type HeartbeatLog struct {
+	ID        string    `json:"id"`
+	WorkerID  string    `json:"workerId"`
+	Timestamp time.Time `json:"timestamp"`
+	Latitude  float64   `json:"latitude"`
+	Longitude float64   `json:"longitude"`
+	CreatedAt time.Time `json:"createdAt"`
+}
