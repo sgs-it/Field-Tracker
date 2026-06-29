@@ -7,6 +7,8 @@ import 'dashboard_view.dart';
 import 'worker_view.dart';
 import 'simulator_panel.dart';
 import 'login_view.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:geolocator/geolocator.dart';
 
 void main() {
   runApp(
@@ -52,31 +54,83 @@ class MainNavigationController extends StatefulWidget {
   State<MainNavigationController> createState() => _MainNavigationControllerState();
 }
 
+class InitialData {
+  final bool isLoggedIn;
+  final String role;
+  final String workerId;
+  InitialData(this.isLoggedIn, this.role, this.workerId);
+}
+
 class _MainNavigationControllerState extends State<MainNavigationController> {
-  bool _isLoggedIn = false;
   bool _isDemoMode = false;
+  late Future<InitialData> _initFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _initFuture = _initializeAppData();
+  }
+
+  Future<InitialData> _initializeAppData() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final loggedIn = prefs.getBool('sgs_is_logged_in') ?? false;
+      final role = prefs.getString('sgs_active_role') ?? 'Admin';
+      final workerId = prefs.getString('sgs_selected_worker_id') ?? 'worker_1';
+      
+      return InitialData(loggedIn, role, workerId);
+    } catch (e) {
+      debugPrint('Initialization error: $e');
+      return InitialData(false, 'Admin', 'worker_1');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final state = Provider.of<TrackerState>(context);
+    return FutureBuilder<InitialData>(
+      future: _initFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting || !snapshot.hasData) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator(color: Colors.tealAccent)),
+          );
+        }
 
-    // If not logged in and not in demo bypass, show Login Screen
-    if (!_isLoggedIn && !_isDemoMode) {
-      return LoginView(
-        onLoginSuccess: () {
-          setState(() {
-            _isLoggedIn = true;
-            _isDemoMode = false;
-          });
-        },
-        onEnterDemoMode: () {
-          setState(() {
-            _isDemoMode = true;
-            _isLoggedIn = false;
-          });
-        },
-      );
-    }
+        final InitialData data = snapshot.data!;
+        final bool isLoggedIn = data.isLoggedIn;
+        final state = Provider.of<TrackerState>(context);
+
+        if (isLoggedIn) {
+          if (state.activeRoleId != data.role || state.selectedWorkerId != data.workerId) {
+             WidgetsBinding.instance.addPostFrameCallback((_) {
+               state.setActiveRole(data.role);
+               state.setSelectedWorker(data.workerId);
+             });
+          }
+        }
+
+        // If not logged in and not in demo bypass, show Login Screen
+        if (!isLoggedIn && !_isDemoMode) {
+          return LoginView(
+            onLoginSuccess: () async {
+              final state = Provider.of<TrackerState>(context, listen: false);
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setBool('sgs_is_logged_in', true);
+              await prefs.setString('sgs_active_role', state.activeRoleId);
+              await prefs.setString('sgs_selected_worker_id', state.selectedWorkerId);
+              setState(() {
+                _initFuture = Future.value(InitialData(true, state.activeRoleId, state.selectedWorkerId));
+                _isDemoMode = false;
+              });
+            },
+            onEnterDemoMode: () {
+              setState(() {
+                _isDemoMode = true;
+                _initFuture = Future.value(InitialData(false, 'Admin', 'worker_1'));
+              });
+            },
+          );
+        }
 
     // If in Demo Mode, display side-by-side view (Dashboard + Mobile Simulator + Simulator Panel)
     if (_isDemoMode) {
@@ -86,14 +140,16 @@ class _MainNavigationControllerState extends State<MainNavigationController> {
           title: const Text('SGS Field Tracker - Presentation Demo Mode', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
           actions: [
             TextButton.icon(
-              onPressed: () {
+              onPressed: () async {
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.setBool('sgs_is_logged_in', false);
                 setState(() {
                   _isDemoMode = false;
-                  _isLoggedIn = false;
+                  _initFuture = Future.value(InitialData(false, 'Admin', 'worker_1'));
                 });
               },
               icon: const Icon(Icons.logout, color: Colors.tealAccent, size: 16),
-              label: const Text('Return to Login', style: TextStyle(color: Colors.white, fontSize: 12)),
+              label: const Text('Logout', style: TextStyle(color: Colors.white, fontSize: 12)),
             ),
             const SizedBox(width: 16),
           ],
@@ -169,9 +225,11 @@ class _MainNavigationControllerState extends State<MainNavigationController> {
                     icon: const Icon(Icons.logout, color: Colors.tealAccent, size: 16),
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
-                    onPressed: () {
+                    onPressed: () async {
+                      final prefs = await SharedPreferences.getInstance();
+                      await prefs.setBool('sgs_is_logged_in', false);
                       setState(() {
-                        _isLoggedIn = false;
+                        _initFuture = Future.value(InitialData(false, 'Admin', 'worker_1'));
                       });
                     },
                   ),
@@ -202,9 +260,11 @@ class _MainNavigationControllerState extends State<MainNavigationController> {
                     ),
                     const SizedBox(width: 12),
                     TextButton.icon(
-                      onPressed: () {
+                      onPressed: () async {
+                        final prefs = await SharedPreferences.getInstance();
+                        await prefs.setBool('sgs_is_logged_in', false);
                         setState(() {
-                          _isLoggedIn = false;
+                          _initFuture = Future.value(InitialData(false, 'Admin', 'worker_1'));
                         });
                       },
                       style: TextButton.styleFrom(
@@ -222,6 +282,8 @@ class _MainNavigationControllerState extends State<MainNavigationController> {
           ),
         ),
       );
-    }
+      }
+    },
+  );
   }
 }

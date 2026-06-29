@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:geolocator/geolocator.dart';
 import 'tracker_state.dart';
 import 'models.dart';
 
@@ -24,6 +25,26 @@ class _LoginViewState extends State<LoginView> {
   String? _errorMessage;
   bool _isWorkerOTP = false;
   final _otpController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _requestLocationPermission();
+  }
+
+  Future<void> _requestLocationPermission() async {
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled().timeout(const Duration(seconds: 3));
+      if (serviceEnabled) {
+        LocationPermission permission = await Geolocator.checkPermission().timeout(const Duration(seconds: 3));
+        if (permission == LocationPermission.denied) {
+          await Geolocator.requestPermission();
+        }
+      }
+    } catch (e) {
+      debugPrint('Location permission error on login: $e');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

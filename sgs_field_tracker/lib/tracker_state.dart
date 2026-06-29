@@ -717,6 +717,7 @@ class TrackerState extends ChangeNotifier {
       _recalculateAttendanceStatus(att);
       _connectWorkerWs();
       _startGpsTracking();
+      saveAttendanceRecordToBackend(att);
       notifyListeners();
     }
   }
@@ -749,6 +750,7 @@ class TrackerState extends ChangeNotifier {
       _recalculateAttendanceStatus(att);
       _closeWorkerWs();
       _stopGpsTracking();
+      saveAttendanceRecordToBackend(att);
       notifyListeners();
     }
   }
@@ -1068,23 +1070,43 @@ class TrackerState extends ChangeNotifier {
 
   // Checklist Actions (Worker Side)
   void toggleChecklistItem(String workerId, String siteId, String itemId) {
-    var att = _getCurrentAttendanceRecord(workerId);
-    if (att != null) {
-      var visit = att.visits.firstWhere((v) => v.siteId == siteId);
-      var item = visit.checklistAtVisit.firstWhere((i) => i.id == itemId);
-      item.isCompleted = !item.isCompleted;
+    var att = _getOrCreateAttendanceRecord(workerId, _selectedDate);
+    var visitIndex = att.visits.indexWhere((v) => v.siteId == siteId);
+    if (visitIndex == -1) {
+      var assign = _assignments.firstWhere((a) => a.workerId == workerId && a.siteId == siteId && isSameDay(a.date, _selectedDate), orElse: () => Assignment(id: 'temp', workerId: '', siteId: '', date: DateTime.now(), shift: '', instructions: '', checklist: [], priority: 'Medium', breakTime: ''));
+      att.visits.add(VisitRecord(
+        siteId: siteId,
+        status: 'Pending',
+        checklistAtVisit: assign.checklist.map((c) => c.copy()).toList(),
+      ));
+      visitIndex = att.visits.length - 1;
+    }
+    var visit = att.visits[visitIndex];
+    var itemIndex = visit.checklistAtVisit.indexWhere((i) => i.id == itemId);
+    if (itemIndex != -1) {
+      visit.checklistAtVisit[itemIndex].isCompleted = !visit.checklistAtVisit[itemIndex].isCompleted;
+      saveAttendanceRecordToBackend(att);
       notifyListeners();
     }
   }
 
   void submitVisitDetails(String workerId, String siteId, {String? comments, String? photoPath}) {
-    var att = _getCurrentAttendanceRecord(workerId);
-    if (att != null) {
-      var visit = att.visits.firstWhere((v) => v.siteId == siteId);
-      visit.comments = comments;
-      visit.photoPath = photoPath;
-      notifyListeners();
+    var att = _getOrCreateAttendanceRecord(workerId, _selectedDate);
+    var visitIndex = att.visits.indexWhere((v) => v.siteId == siteId);
+    if (visitIndex == -1) {
+      var assign = _assignments.firstWhere((a) => a.workerId == workerId && a.siteId == siteId && isSameDay(a.date, _selectedDate), orElse: () => Assignment(id: 'temp', workerId: '', siteId: '', date: DateTime.now(), shift: '', instructions: '', checklist: [], priority: 'Medium', breakTime: ''));
+      att.visits.add(VisitRecord(
+        siteId: siteId,
+        status: 'Pending',
+        checklistAtVisit: assign.checklist.map((c) => c.copy()).toList(),
+      ));
+      visitIndex = att.visits.length - 1;
     }
+    var visit = att.visits[visitIndex];
+    visit.comments = comments;
+    visit.photoPath = photoPath;
+    saveAttendanceRecordToBackend(att);
+    notifyListeners();
   }
 
   // Geofence Simulators

@@ -140,9 +140,29 @@ class _WorkerViewState extends State<WorkerView> {
                     style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 4),
-                  Text(
-                    '${worker.designation} • ${worker.employeeId}',
-                    style: const TextStyle(color: Colors.grey, fontSize: 12),
+                  Row(
+                    children: [
+                      Text(
+                        '${worker.designation} • ${worker.employeeId}',
+                        style: const TextStyle(color: Colors.grey, fontSize: 12),
+                      ),
+                      const SizedBox(width: 12),
+                      InkWell(
+                        onTap: () async {
+                          DateTime? picked = await showDatePicker(
+                            context: context,
+                            initialDate: state.selectedDate,
+                            firstDate: DateTime(2026, 1, 1),
+                            lastDate: DateTime(2026, 12, 31),
+                          );
+                          if (picked != null) state.setSelectedDate(picked);
+                        },
+                        child: Text(
+                          DateFormat('MMM d, yyyy').format(state.selectedDate),
+                          style: const TextStyle(color: Colors.tealAccent, fontSize: 12, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -292,7 +312,7 @@ class _WorkerViewState extends State<WorkerView> {
         var site = state.sites.firstWhere((s) => s.id == assign.siteId, orElse: () => state.sites.first);
         var visit = att.visits.firstWhere(
           (v) => v.siteId == site.id,
-          orElse: () => VisitRecord(siteId: site.id, checklistAtVisit: []),
+          orElse: () => VisitRecord(siteId: site.id, checklistAtVisit: assign.checklist.map((c) => c.copy()).toList()),
         );
 
         Color statusColor = Colors.grey;
@@ -890,6 +910,14 @@ class _WorkerViewState extends State<WorkerView> {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setSheetState) {
+            final att = state.allAttendanceRecords.firstWhere(
+              (r) => r.workerId == state.currentWorker.id && state.isSameDay(r.date, state.selectedDate),
+              orElse: () => AttendanceRecord(id: 'temp', workerId: '', date: DateTime.now(), visits: []),
+            );
+            final currentVisit = att.visits.firstWhere(
+              (v) => v.siteId == site.id,
+              orElse: () => visit,
+            );
             return Padding(
               padding: EdgeInsets.fromLTRB(16, 20, 16, MediaQuery.of(context).viewInsets.bottom + 20),
               child: SingleChildScrollView(
@@ -954,7 +982,7 @@ class _WorkerViewState extends State<WorkerView> {
                   const Text('SITE CHECKLIST (TASK DETAILS)', style: TextStyle(color: Colors.tealAccent, fontSize: 10, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 6),
                   
-                  ...visit.checklistAtVisit.map((item) {
+                  ...currentVisit.checklistAtVisit.map((item) {
                     return CheckboxListTile(
                       title: Text(item.task, style: const TextStyle(color: Colors.white, fontSize: 12)),
                       subtitle: Text('Category: ${item.category}', style: const TextStyle(color: Colors.grey, fontSize: 10)),

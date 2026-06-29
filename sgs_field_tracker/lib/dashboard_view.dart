@@ -46,6 +46,11 @@ class _DashboardViewState extends State<DashboardView> {
   final MapController _dashboardMapController = MapController();
   String _selectedDepartmentFilter = 'All';
   MapStyle _dashboardMapStyle = MapStyle.satellite;
+  
+  Worker? _selectedSiteWiseWorker;
+  final ScrollController _dailyScrollCtrl = ScrollController();
+  final ScrollController _siteWiseScrollCtrl = ScrollController();
+  final ScrollController _overtimeScrollCtrl = ScrollController();
 
   final List<String> _tabs = [
     'Dashboard',
@@ -60,6 +65,15 @@ class _DashboardViewState extends State<DashboardView> {
     'Settings',
     'Profile',
   ];
+
+  @override
+  void dispose() {
+    _dashboardMapController.dispose();
+    _dailyScrollCtrl.dispose();
+    _siteWiseScrollCtrl.dispose();
+    _overtimeScrollCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1835,7 +1849,7 @@ class _DashboardViewState extends State<DashboardView> {
 
                           return TableCell(
                             child: InkWell(
-                              onTap: () => _showCellSchedulingDialog(context, state, worker, date),
+                              onTap: cellAssigns.isEmpty ? () => _showCellSchedulingDialog(context, state, worker, date, forceNew: true) : null,
                               child: Container(
                                 constraints: const BoxConstraints(minHeight: 60),
                                 padding: const EdgeInsets.all(6),
@@ -1848,9 +1862,11 @@ class _DashboardViewState extends State<DashboardView> {
                                         mainAxisAlignment: MainAxisAlignment.center,
                                         children: cellAssigns.map((a) {
                                           var site = state.sites.firstWhere((s) => s.id == a.siteId, orElse: () => state.sites.first);
-                                          return Container(
-                                            margin: const EdgeInsets.only(bottom: 2),
-                                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                          return InkWell(
+                                            onTap: () => _showCellSchedulingDialog(context, state, worker, date, targetAssignment: a),
+                                            child: Container(
+                                              margin: const EdgeInsets.only(bottom: 2),
+                                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                                             decoration: BoxDecoration(color: const Color(0xFF13131A), borderRadius: BorderRadius.circular(4)),
                                             child: Row(
                                               mainAxisSize: MainAxisSize.min,
@@ -1873,7 +1889,7 @@ class _DashboardViewState extends State<DashboardView> {
                                                 )
                                               ],
                                             ),
-                                          );
+                                          ));
                                         }).toList(),
                                       ),
                               ),
@@ -1892,24 +1908,53 @@ class _DashboardViewState extends State<DashboardView> {
     );
   }
 
-  void _showCellSchedulingDialog(BuildContext context, TrackerState state, Worker worker, DateTime date) {
+  void _showCellSchedulingDialog(BuildContext context, TrackerState state, Worker worker, DateTime date, {bool forceNew = false, Assignment? targetAssignment}) {
     if (state.activeRoleId == 'Supervisor') {
       // Show warning since Supervisor can only temporarily rearrange but let's allow it in simulation
     }
 
-    final instructionController = TextEditingController();
-    final breakController = TextEditingController(text: "12:00 PM - 01:00 PM");
+    final matchingAssignments = state.allAssignments.where((a) => a.workerId == worker.id && state.isSameDay(a.date, date)).toList();
+    final existingAssignment = forceNew ? null : (targetAssignment ?? (matchingAssignments.isNotEmpty ? matchingAssignments.first : null));
+    bool isEditing = existingAssignment == null;
+
+    final instructionController = TextEditingController(text: existingAssignment?.instructions ?? "");
+    final breakController = TextEditingController(text: existingAssignment?.breakTime ?? "12:00 PM - 01:00 PM");
     
     // Checklist inputs
-    final List<ChecklistItem> checklist = [
+    List<ChecklistItem> defaultChecklists = [
       ChecklistItem(id: 'c_l1', task: 'Check resources (Labour present)', category: 'Labour'),
       ChecklistItem(id: 'c_l2', task: 'Check resources (Equipment & Machineries)', category: 'Equipment'),
       ChecklistItem(id: 'c_l3', task: 'Inspect Hand tools & Vehicle log', category: 'Tools'),
       ChecklistItem(id: 'c_l4', task: 'Verify materials status', category: 'Materials'),
     ];
 
-    String selectedSiteId = state.sites.firstWhere((s) => !s.isAccommodation).id;
-    String selectedPriority = 'High';
+    List<ChecklistItem> checklist = [];
+    if (existingAssignment != null) {
+      checklist = defaultChecklists.map((c) {
+        final copy = c.copy();
+        copy.isCompleted = existingAssignment.checklist.any((ea) => ea.task == c.task);
+        return copy;
+      }).toList();
+      for (var ea in existingAssignment.checklist) {
+        if (!checklist.any((c) => c.task == ea.task)) {
+          final custom = ea.copy();
+          custom.isCompleted = true; // Selected
+          checklist.add(custom);
+        }
+      }
+    } else {
+      checklist = defaultChecklists.map((c) {
+        final copy = c.copy();
+        copy.isCompleted = true; // Default behavior
+        return copy;
+      }).toList();
+    }
+
+    final newChecklistController = TextEditingController();
+    final checklistScrollController = ScrollController();
+
+    String selectedSiteId = existingAssignment?.siteId ?? state.sites.firstWhere((s) => !s.isAccommodation).id;
+    String selectedPriority = existingAssignment?.priority ?? 'High';
 
     showDialog(
       context: context,
@@ -1918,85 +1963,185 @@ class _DashboardViewState extends State<DashboardView> {
           builder: (context, setDialogState) {
             return AlertDialog(
               backgroundColor: const Color(0xFF1E1E26),
-              title: Text('Schedule Work: ${worker.name}\nDate: ${DateFormat('dd-MMM-yyyy').format(date)}', style: const TextStyle(color: Colors.white, fontSize: 14)),
-              content: SingleChildScrollView(
+              title: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Schedule Work: ${worker.name}\nDate: ${DateFormat('dd-MMM-yyyy').format(date)}', style: const TextStyle(color: Colors.white, fontSize: 14)),
+                  if (existingAssignment != null) 
+                    IconButton(
+                      icon: Icon(isEditing ? Icons.close : Icons.edit, color: Colors.tealAccent),
+                      onPressed: () => setDialogState(() => isEditing = !isEditing),
+                    )
+                ],
+              ),
+              content: SizedBox(
+                width: double.maxFinite,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        const Text('Select Worksite: ', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                        DropdownButton<String>(
-                          value: selectedSiteId,
-                          dropdownColor: const Color(0xFF1E1E26),
-                          style: const TextStyle(color: Colors.white),
-                          onChanged: (val) => setDialogState(() => selectedSiteId = val!),
-                          items: state.sites.where((s) => !s.isAccommodation).map((site) {
-                            return DropdownMenuItem(value: site.id, child: Text(site.name));
-                          }).toList(),
+                    Flexible(
+                      child: SingleChildScrollView(
+                        controller: checklistScrollController,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Text('Select Worksite: ', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                                if (isEditing)
+                                  DropdownButton<String>(
+                                    value: selectedSiteId,
+                                    dropdownColor: const Color(0xFF1E1E26),
+                                    style: const TextStyle(color: Colors.white),
+                                    onChanged: (val) => setDialogState(() => selectedSiteId = val!),
+                                    items: state.sites.where((s) => !s.isAccommodation).map((site) {
+                                      return DropdownMenuItem(value: site.id, child: Text(site.name));
+                                    }).toList(),
+                                  )
+                                else
+                                  Text(state.sites.firstWhere((s) => s.id == selectedSiteId, orElse: () => state.sites.first).name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                const Text('Priority: ', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                                if (isEditing)
+                                  DropdownButton<String>(
+                                    value: selectedPriority,
+                                    dropdownColor: const Color(0xFF1E1E26),
+                                    style: const TextStyle(color: Colors.white),
+                                    onChanged: (val) => setDialogState(() => selectedPriority = val!),
+                                    items: ['High', 'Medium', 'Low'].map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
+                                  )
+                                else
+                                  Text(selectedPriority, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            if (isEditing)
+                              TextField(
+                                controller: instructionController,
+                                style: const TextStyle(color: Colors.white),
+                                decoration: const InputDecoration(labelText: 'Instructions', labelStyle: TextStyle(color: Colors.grey)),
+                              )
+                            else
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text('Instructions', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                                  Text(instructionController.text.isEmpty ? 'None' : instructionController.text, style: const TextStyle(color: Colors.white)),
+                                ],
+                              ),
+                            const SizedBox(height: 12),
+                            if (isEditing)
+                              TextField(
+                                controller: breakController,
+                                style: const TextStyle(color: Colors.white),
+                                decoration: const InputDecoration(labelText: 'Break Times', labelStyle: TextStyle(color: Colors.grey)),
+                              )
+                            else
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text('Break Times', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                                  Text(breakController.text, style: const TextStyle(color: Colors.white)),
+                                ],
+                              ),
+                            const SizedBox(height: 16),
+                            const Align(alignment: Alignment.centerLeft, child: Text('Checklists to Attach:', style: TextStyle(color: Colors.tealAccent, fontSize: 10, fontWeight: FontWeight.bold))),
+                            const SizedBox(height: 8),
+                            Column(
+                              children: checklist.map((item) {
+                                return CheckboxListTile(
+                                  title: Text(item.task, style: const TextStyle(color: Colors.white, fontSize: 11)),
+                                  value: item.isCompleted,
+                                  onChanged: isEditing ? (val) => setDialogState(() => item.isCompleted = val!) : null,
+                                  activeColor: Colors.tealAccent,
+                                  contentPadding: EdgeInsets.zero,
+                                  controlAffinity: ListTileControlAffinity.leading,
+                                );
+                              }).toList(),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        const Text('Priority: ', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                        DropdownButton<String>(
-                          value: selectedPriority,
-                          dropdownColor: const Color(0xFF1E1E26),
-                          style: const TextStyle(color: Colors.white),
-                          onChanged: (val) => setDialogState(() => selectedPriority = val!),
-                          items: ['High', 'Medium', 'Low'].map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
-                        ),
-                      ],
-                    ),
-                    TextField(
-                      controller: instructionController,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: const InputDecoration(labelText: 'Instructions', labelStyle: TextStyle(color: Colors.grey)),
-                    ),
-                    TextField(
-                      controller: breakController,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: const InputDecoration(labelText: 'Break Times', labelStyle: TextStyle(color: Colors.grey)),
-                    ),
-                    const SizedBox(height: 12),
-                    const Align(alignment: Alignment.centerLeft, child: Text('Default Checklists to Attach:', style: TextStyle(color: Colors.tealAccent, fontSize: 10, fontWeight: FontWeight.bold))),
-                    ...checklist.map((item) {
-                      return CheckboxListTile(
-                        title: Text(item.task, style: const TextStyle(color: Colors.white, fontSize: 11)),
-                        value: item.isCompleted,
-                        onChanged: (val) => setDialogState(() => item.isCompleted = val!),
-                        activeColor: Colors.tealAccent,
-                        contentPadding: EdgeInsets.zero,
-                        controlAffinity: ListTileControlAffinity.leading,
-                      );
-                    })
+                    if (isEditing) ...[
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: newChecklistController,
+                              style: const TextStyle(color: Colors.white, fontSize: 12),
+                              decoration: const InputDecoration(hintText: 'Add Checklist Option', hintStyle: TextStyle(color: Colors.grey, fontSize: 12)),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              if (newChecklistController.text.isNotEmpty) {
+                                setDialogState(() {
+                                  checklist.add(ChecklistItem(id: 'custom_${DateTime.now().millisecondsSinceEpoch}', task: newChecklistController.text, category: 'Custom', isCompleted: true));
+                                  newChecklistController.clear();
+                                });
+                                Future.delayed(const Duration(milliseconds: 100), () {
+                                  if (checklistScrollController.hasClients) {
+                                    checklistScrollController.animateTo(
+                                      checklistScrollController.position.maxScrollExtent,
+                                      duration: const Duration(milliseconds: 300),
+                                      curve: Curves.easeOut,
+                                    );
+                                  }
+                                });
+                              }
+                            },
+                            child: const Text('Add', style: TextStyle(color: Colors.tealAccent)),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
               actions: [
+                if (existingAssignment != null && !isEditing)
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _showCellSchedulingDialog(context, state, worker, date, forceNew: true);
+                    },
+                    child: const Text('Add New Site', style: TextStyle(color: Colors.tealAccent)),
+                  ),
                 TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+                  child: const Text('Close', style: TextStyle(color: Colors.grey)),
                 ),
-                ElevatedButton(
-                  onPressed: () {
-                    // Save assignment
-                    state.assignSiteToWorker(
-                      workerId: worker.id,
-                      siteId: selectedSiteId,
-                      date: date,
-                      instructions: instructionController.text,
-                      checklist: checklist.where((c) => c.isCompleted).toList(), // attach only checked ones
-                      priority: selectedPriority,
-                      breakTime: breakController.text,
-                    );
-                    Navigator.pop(context);
-                  },
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.tealAccent, foregroundColor: Colors.black),
-                  child: const Text('Assign'),
-                ),
+                if (isEditing)
+                  ElevatedButton(
+                    onPressed: () {
+                      final finalChecklist = checklist.where((c) => c.isCompleted).map((c) {
+                        final copy = c.copy();
+                        copy.isCompleted = false; 
+                        return copy;
+                      }).toList();
+
+                      state.assignSiteToWorker(
+                        workerId: worker.id,
+                        siteId: selectedSiteId,
+                        date: date,
+                        instructions: instructionController.text,
+                        checklist: finalChecklist,
+                        priority: selectedPriority,
+                        breakTime: breakController.text,
+                      );
+                      Navigator.pop(context);
+                    },
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.tealAccent),
+                    child: const Text('Save Assignment', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                  ),
               ],
             );
           },
@@ -2190,10 +2335,14 @@ class _DashboardViewState extends State<DashboardView> {
   }
 
   Widget _buildDailyAttendanceReport(BuildContext context, TrackerState state) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
+    return Scrollbar(
+      controller: _dailyScrollCtrl,
+      thumbVisibility: true,
       child: SingleChildScrollView(
-        child: Container(
+        controller: _dailyScrollCtrl,
+        scrollDirection: Axis.horizontal,
+        child: SingleChildScrollView(
+          child: Container(
           color: const Color(0xFF1E1E26),
           child: DataTable(
             columns: const [
@@ -2266,25 +2415,68 @@ class _DashboardViewState extends State<DashboardView> {
           ),
         ),
       ),
+      ),
     );
   }
 
   Widget _buildSiteWiseDetailedReport(BuildContext context, TrackerState state) {
-    // Shows structured sequence: morning exit accommodation as first row, and evening entry as last row!
-    // We will build a report for the currently selected worker John (worker_1)
-    final w = state.currentWorker;
+    if (_selectedSiteWiseWorker == null) {
+      return Scrollbar(
+        controller: _siteWiseScrollCtrl,
+        thumbVisibility: true,
+        child: SingleChildScrollView(
+          controller: _siteWiseScrollCtrl,
+          scrollDirection: Axis.horizontal,
+          child: SingleChildScrollView(
+            child: Container(
+              color: const Color(0xFF1E1E26),
+              child: DataTable(
+                columns: const [
+                  DataColumn(label: Text('Emp ID', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+                  DataColumn(label: Text('Worker Name', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+                  DataColumn(label: Text('Daily Status', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+                  DataColumn(label: Text('Action', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+                ],
+                rows: state.workers.map((w) {
+                  final r = state.allAttendanceRecords.firstWhere(
+                    (rec) => rec.workerId == w.id && state.isSameDay(rec.date, state.selectedDate),
+                    orElse: () => state.allAttendanceRecords.firstWhere((rec) => rec.workerId == w.id, orElse: () => state.allAttendanceRecords.first),
+                  );
+                  return DataRow(
+                    cells: [
+                      DataCell(Text(w.employeeId, style: const TextStyle(color: Colors.white))),
+                      DataCell(
+                        TextButton(
+                          onPressed: () => setState(() => _selectedSiteWiseWorker = w),
+                          style: TextButton.styleFrom(padding: EdgeInsets.zero, alignment: Alignment.centerLeft),
+                          child: Text(w.name, style: const TextStyle(color: Colors.tealAccent, decoration: TextDecoration.underline, decorationColor: Colors.tealAccent)),
+                        ),
+                      ),
+                      DataCell(Text(r.status, style: const TextStyle(color: Colors.grey))),
+                      DataCell(
+                        ElevatedButton(
+                          onPressed: () => setState(() => _selectedSiteWiseWorker = w),
+                          style: ElevatedButton.styleFrom(backgroundColor: Colors.tealAccent, foregroundColor: Colors.black),
+                          child: const Text('View Details', style: TextStyle(fontSize: 12)),
+                        ),
+                      ),
+                    ],
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    final w = _selectedSiteWiseWorker!;
     final r = state.allAttendanceRecords.firstWhere(
       (rec) => rec.workerId == w.id && state.isSameDay(rec.date, state.selectedDate),
       orElse: () => state.allAttendanceRecords.first,
     );
 
-    // Filter and sort visits:
-    // Work visits + Accommodation entry/exits sorted by exitTime/entryTime.
-    // In mock, we populate accommodation records
     List<Map<String, dynamic>> detailedRows = [];
-
-    // Let's populate the details matching the word doc sample
-    // Row 1: SGS Labour Camp (Accommodation exit)
     detailedRows.add({
       'name': 'SGS Labour Camp',
       'type': 'Accommodation (ACC-001)',
@@ -2297,10 +2489,9 @@ class _DashboardViewState extends State<DashboardView> {
       'color': Colors.blueAccent,
     });
 
-    // Populate regular site visits
     for (var visit in r.visits) {
       final site = state.sites.firstWhere((s) => s.id == visit.siteId);
-      if (site.isAccommodation) continue; // skip accommodation duplicate
+      if (site.isAccommodation) continue;
 
       String entryStr = visit.entryTime != null ? DateFormat('hh:mm a').format(visit.entryTime!) : '—';
       String exitStr = visit.exitTime != null ? DateFormat('hh:mm a').format(visit.exitTime!) : '—';
@@ -2324,8 +2515,6 @@ class _DashboardViewState extends State<DashboardView> {
       });
     }
 
-    // Row Last: SGS Labour Camp (Accommodation entry)
-    // Find if accommodation entry exists
     bool accReentered = r.visits.any((v) {
       var s = state.sites.firstWhere((site) => site.id == v.siteId, orElse: () => state.sites.first);
       return s.isAccommodation && v.status == 'Entry Recorded';
@@ -2347,36 +2536,53 @@ class _DashboardViewState extends State<DashboardView> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Site-wise Event Details for Worker: ${w.name} (${w.employeeId})', style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+          Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.arrow_back, color: Colors.tealAccent),
+                onPressed: () => setState(() => _selectedSiteWiseWorker = null),
+              ),
+              Expanded(
+                child: Text('Site-wise Event Details for Worker: ${w.name} (${w.employeeId})', style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
           const SizedBox(height: 12),
-          Container(
-            color: const Color(0xFF1E1E26),
-            width: double.infinity,
-            child: DataTable(
-              columns: const [
-                DataColumn(label: Text('Site Name', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
-                DataColumn(label: Text('Type', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
-                DataColumn(label: Text('Entry', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
-                DataColumn(label: Text('Exit', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
-                DataColumn(label: Text('Duration', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
-                DataColumn(label: Text('Checklist', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
-                DataColumn(label: Text('Instructions', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
-                DataColumn(label: Text('Visit Status', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
-              ],
-              rows: detailedRows.map((row) {
-                return DataRow(
-                  cells: [
-                    DataCell(Text(row['name'], style: TextStyle(color: row['color'], fontWeight: FontWeight.bold))),
-                    DataCell(Text(row['type'], style: const TextStyle(color: Colors.grey))),
-                    DataCell(Text(row['entry'], style: const TextStyle(color: Colors.white))),
-                    DataCell(Text(row['exit'], style: const TextStyle(color: Colors.white))),
-                    DataCell(Text(row['duration'], style: const TextStyle(color: Colors.grey))),
-                    DataCell(Text(row['checklist'], style: const TextStyle(color: Colors.white))),
-                    DataCell(Text(row['instructions'], style: const TextStyle(color: Colors.white))),
-                    DataCell(Text(row['status'], style: TextStyle(color: row['color']))),
+          Scrollbar(
+            controller: _siteWiseScrollCtrl,
+            thumbVisibility: true,
+            child: SingleChildScrollView(
+              controller: _siteWiseScrollCtrl,
+              scrollDirection: Axis.horizontal,
+              child: Container(
+                color: const Color(0xFF1E1E26),
+                child: DataTable(
+                  columns: const [
+                    DataColumn(label: Text('Site Name', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('Type', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('Entry', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('Exit', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('Duration', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('Checklist', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('Instructions', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('Visit Status', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
                   ],
-                );
-              }).toList(),
+                  rows: detailedRows.map((row) {
+                    return DataRow(
+                      cells: [
+                        DataCell(Text(row['name'], style: TextStyle(color: row['color'], fontWeight: FontWeight.bold))),
+                        DataCell(Text(row['type'], style: const TextStyle(color: Colors.grey))),
+                        DataCell(Text(row['entry'], style: const TextStyle(color: Colors.white))),
+                        DataCell(Text(row['exit'], style: const TextStyle(color: Colors.white))),
+                        DataCell(Text(row['duration'], style: const TextStyle(color: Colors.grey))),
+                        DataCell(Text(row['checklist'], style: const TextStyle(color: Colors.white))),
+                        DataCell(Text(row['instructions'], style: const TextStyle(color: Colors.white))),
+                        DataCell(Text(row['status'], style: TextStyle(color: row['color']))),
+                      ],
+                    );
+                  }).toList(),
+                ),
+              ),
             ),
           ),
         ],
@@ -2390,10 +2596,11 @@ class _DashboardViewState extends State<DashboardView> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text('Overtime Salary Calculation Engine', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(color: Colors.teal.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
@@ -2402,10 +2609,15 @@ class _DashboardViewState extends State<DashboardView> {
             ],
           ),
           const SizedBox(height: 12),
-          Container(
-            color: const Color(0xFF1E1E26),
-            width: double.infinity,
-            child: DataTable(
+          Scrollbar(
+            controller: _overtimeScrollCtrl,
+            thumbVisibility: true,
+            child: SingleChildScrollView(
+              controller: _overtimeScrollCtrl,
+              scrollDirection: Axis.horizontal,
+              child: Container(
+                color: const Color(0xFF1E1E26),
+                child: DataTable(
               columns: const [
                 DataColumn(label: Text('Emp ID', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
                 DataColumn(label: Text('Worker Name', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
@@ -2438,9 +2650,11 @@ class _DashboardViewState extends State<DashboardView> {
               }).toList(),
             ),
           ),
-        ],
+        ),
       ),
-    );
+    ],
+  ),
+);
   }
 
   Widget _buildFloatingNotifications(BuildContext context, TrackerState state) {
@@ -2544,6 +2758,7 @@ class _AddSiteDialogState extends State<_AddSiteDialog> {
   bool _isLocating = false;
 
   bool _isSaving = false;
+  bool _isFullscreenMap = false;
 
   static const List<String> _colorOptions = [
     '#00BFA5', '#FF6D00', '#7C4DFF', '#FF4081', '#00B0FF',
@@ -2905,24 +3120,26 @@ class _AddSiteDialogState extends State<_AddSiteDialog> {
 
             // ── Body: Left form + Right map (Desktop) or Vertical Stack (Mobile) ──
             Expanded(
-              child: isMobile
-                  ? SingleChildScrollView(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: _buildFormPanel(),
+              child: _isFullscreenMap
+                  ? _buildMapPanel(fenceColor)
+                  : isMobile
+                      ? SingleChildScrollView(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: _buildFormPanel(),
+                              ),
+                              const Divider(color: Color(0xFF2D2D38), height: 1),
+                              SizedBox(
+                                height: keyboardOpen ? 120 : 280,
+                                child: _buildMapPanel(fenceColor),
+                              ),
+                            ],
                           ),
-                          const Divider(color: Color(0xFF2D2D38), height: 1),
-                          SizedBox(
-                            height: keyboardOpen ? 120 : 280,
-                            child: _buildMapPanel(fenceColor),
-                          ),
-                        ],
-                      ),
-                    )
-                  : Row(
+                        )
+                      : Row(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         // ── LEFT: Site Details Form ──────────────────────────────────
@@ -3582,6 +3799,18 @@ class _AddSiteDialogState extends State<_AddSiteDialog> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
+                // Fullscreen toggle
+                FloatingActionButton.small(
+                  heroTag: 'fullscreen_fab',
+                  backgroundColor: const Color(0xFF1E1E26),
+                  onPressed: () {
+                    setState(() {
+                      _isFullscreenMap = !_isFullscreenMap;
+                    });
+                  },
+                  child: Icon(_isFullscreenMap ? Icons.fullscreen_exit : Icons.fullscreen, color: Colors.white, size: 18),
+                ),
+                const SizedBox(height: 8),
                 // Go to device location
                 FloatingActionButton.small(
                   heroTag: 'goto_device_loc_fab',

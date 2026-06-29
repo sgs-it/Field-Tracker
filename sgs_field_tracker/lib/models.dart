@@ -223,13 +223,13 @@ class Worker {
       'staffHierarchy': staffHierarchy,
       'isActive': isActive,
       'emiratesId': emiratesId,
-      'emiratesIdExpiry': emiratesIdExpiry.toIso8601String() + 'Z',
+      'emiratesIdExpiry': emiratesIdExpiry.isUtc ? emiratesIdExpiry.toIso8601String() : '${emiratesIdExpiry.toIso8601String()}Z',
       'passportNo': passportNo,
-      'passportExpiry': passportExpiry.toIso8601String() + 'Z',
+      'passportExpiry': passportExpiry.isUtc ? passportExpiry.toIso8601String() : '${passportExpiry.toIso8601String()}Z',
       'labourCardNo': labourCardNo,
-      'labourCardExpiry': labourCardExpiry.toIso8601String() + 'Z',
-      'joinedDate': joinedDate.toIso8601String() + 'Z',
-      'leaveDueDate': leaveDueDate.toIso8601String() + 'Z',
+      'labourCardExpiry': labourCardExpiry.isUtc ? labourCardExpiry.toIso8601String() : '${labourCardExpiry.toIso8601String()}Z',
+      'joinedDate': joinedDate.isUtc ? joinedDate.toIso8601String() : '${joinedDate.toIso8601String()}Z',
+      'leaveDueDate': leaveDueDate.isUtc ? leaveDueDate.toIso8601String() : '${leaveDueDate.toIso8601String()}Z',
     };
   }
 
@@ -350,7 +350,7 @@ class Assignment {
       'id': id,
       'workerId': workerId,
       'siteId': siteId,
-      'date': date.toIso8601String() + 'Z',
+      'date': date.isUtc ? date.toIso8601String() : '${date.toIso8601String()}Z',
       'shift': shift,
       'instructions': instructions,
       'checklist': checklist.map((e) => e.toJson()).toList(),
@@ -463,7 +463,7 @@ class AttendanceRecord {
     return {
       'id': id,
       'workerId': workerId,
-      'date': date.toIso8601String() + 'Z',
+      'date': date.isUtc ? date.toIso8601String() : '${date.toIso8601String()}Z',
       'shiftStart': shiftStart?.toUtc().toIso8601String(),
       'shiftEnd': shiftEnd?.toUtc().toIso8601String(),
       'visits': visits.map((e) => e.toJson()).toList(),
