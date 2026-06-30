@@ -1,0 +1,914 @@
+diff --git a/sgs_field_tracker/lib/live_map_view.dart b/sgs_field_tracker/lib/live_map_view.dart
+index b5c3433..369c83a 100644
+--- a/sgs_field_tracker/lib/live_map_view.dart
++++ b/sgs_field_tracker/lib/live_map_view.dart
+@@ -1,3 +1,5 @@
++import 'dart:async';
++import 'dart:convert';
+ import 'dart:math';
+ import 'package:flutter/material.dart';
+ import 'package:flutter_map/flutter_map.dart';
+@@ -29,10 +31,10 @@ String getInitials(String name) {
+   return parts[0][0].toUpperCase();
+ }
+ 
+-// ─────────────────────────────────────────────────────────────────────────────
++// ─────────────────────────────────────────────────────────────────────────────
+ // LIVE MAP VIEW
+ // Full Wialon-style real-time map panel used in Tab 0 of the dashboard
+-// ─────────────────────────────────────────────────────────────────────────────
++// ─────────────────────────────────────────────────────────────────────────────
+ 
+ class LiveMapView extends StatefulWidget {
+   const LiveMapView({super.key});
+@@ -52,6 +54,15 @@ class _LiveMapViewState extends State<LiveMapView> {
+   bool _hasCenteredOnPcLocation = false;
+   MapStyle _mapStyle = MapStyle.satellite;
+   double _currentZoom = 12.0; // tracks live zoom for adaptive geofence rendering
++  bool _showSidebar = true;
++  bool _showSidebarInit = false;
++
++  // Search state
++  final TextEditingController _searchCtrl = TextEditingController();
++  String _searchQuery = '';
++  List<Map<String, dynamic>> _placeSuggestions = [];
++  bool _isSearchingPlaces = false;
++  Timer? _debounceTimer;
+ 
+   // Geofence drawing
+   LatLng? _drawingCenter;
+@@ -82,46 +93,70 @@ class _LiveMapViewState extends State<LiveMapView> {
+     _manualLatCtrl.dispose();
+     _manualLngCtrl.dispose();
+     _manualRadiusCtrl.dispose();
++    _searchCtrl.dispose();
++    _debounceTimer?.cancel();
+     super.dispose();
+   }
+ 
+   @override
+   Widget build(BuildContext context) {
+-    final mapSvc = context.watch<MapService>();
+-    final trackerState = context.watch<TrackerState>();
+-
+-    // Center on user PC location once it is loaded
+-    if (trackerState.hasRealLocation && !_hasCenteredOnPcLocation) {
+-      _hasCenteredOnPcLocation = true;
+-      WidgetsBinding.instance.addPostFrameCallback((_) {
+-        _mapController.move(
+-          LatLng(trackerState.currentLat, trackerState.currentLng),
+-          12,
+-        );
+-      });
+-    }
++    final mapSvc = Provider.of<MapService>(context);
++    final trackerState = Provider.of<TrackerState>(context);
++    final isDesktop = MediaQuery.of(context).size.width > 720;
+ 
+-    return Row(
+-      crossAxisAlignment: CrossAxisAlignment.stretch,
+-      children: [
+-        // ── Left: Map ────────────────────────────────────────────────────────
+-        Expanded(
+-          flex: 3,
+-          child: _buildMap(mapSvc, trackerState),
+-        ),
++    // Auto-open sidebar on first build (desktop)
++    if (!_showSidebarInit && isDesktop) {
++      _showSidebarInit = true;
++    }
+ 
+-        const SizedBox(width: 16),
++    final mapWidget = _buildMap(mapSvc, trackerState);
++    final sidebarWidget = _buildWorkerSidebar(mapSvc, trackerState);
+ 
+-        // ── Right: Worker Sidebar ────────────────────────────────────────────
+-        SizedBox(
+-          width: 260,
+-          child: _buildWorkerSidebar(mapSvc, trackerState),
+-        ),
+-      ],
+-    );
++    if (isDesktop) {
++      return Row(
++        crossAxisAlignment: CrossAxisAlignment.stretch,
++        children: [
++          // ── Left: Map ────────────────────────────────────────────────────────
++          Expanded(
++            child: mapWidget,
++          ),
++          if (_showSidebar) ...[
++            const SizedBox(width: 16),
++            // ── Right: Worker Sidebar ────────────────────────────────────────────
++            SizedBox(
++              width: 260,
++              child: sidebarWidget,
++            ),
++          ],
++        ],
++      );
++    } else {
++      // Mobile/Tablet: Stack layout so sidebar overlays map
++      return Stack(
++        children: [
++          Positioned.fill(child: mapWidget),
++          if (_showSidebar)
++            Positioned(
++              top: 0,
++              bottom: 0,
++              right: 0,
++              width: 260,
++              child: Material(
++                elevation: 16,
++                color: const Color(0xFF1E1E26),
++                borderRadius: const BorderRadius.only(
++                  topLeft: Radius.circular(16),
++                  bottomLeft: Radius.circular(16),
++                ),
++                child: sidebarWidget,
++              ),
++            ),
++        ],
++      );
++    }
+   }
+ 
+-  // ── Map Widget ──────────────────────────────────────────────────────────────
++  // ── Map Widget ──────────────────────────────────────────────────────────────
+ 
+   Widget _buildMap(MapService mapSvc, TrackerState trackerState) {
+     return Container(
+@@ -133,7 +168,7 @@ class _LiveMapViewState extends State<LiveMapView> {
+         borderRadius: BorderRadius.circular(16),
+         child: Stack(
+           children: [
+-            // ── FlutterMap ────────────────────────────────────────────────────
++            // ── FlutterMap ────────────────────────────────────────────────────
+             FlutterMap(
+               mapController: _mapController,
+               options: MapOptions(
+@@ -143,12 +178,9 @@ class _LiveMapViewState extends State<LiveMapView> {
+                 onTap: _isDrawingGeofence ? _onMapTap : null,
+                 onMapEvent: (event) {
+                   // Track zoom so geofence rendering adapts (icon vs full shape)
+-                  if (event is MapEventMove || event is MapEventScrollWheelZoom ||
+-                      event is MapEventDoubleTapZoom || event is MapEventFlingAnimation) {
+-                    final newZoom = _mapController.camera.zoom;
+-                    if ((newZoom - _currentZoom).abs() > 0.1) {
+-                      setState(() => _currentZoom = newZoom);
+-                    }
++                  final newZoom = _mapController.camera.zoom;
++                  if ((newZoom - _currentZoom).abs() > 0.1) {
++                    setState(() => _currentZoom = newZoom);
+                   }
+                 },
+               ),
+@@ -177,12 +209,12 @@ class _LiveMapViewState extends State<LiveMapView> {
+                     tileSize: 256,
+                   )
+                 else if (_mapStyle == MapStyle.satellite)
+-                  // Google Satellite: globally available, CORS-friendly, crisp up to zoom 21
++                  // Esri World Imagery
+                   TileLayer(
+                     urlTemplate:
+-                        'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
++                        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                     userAgentPackageName: 'com.sgs.field_tracker',
+-                    maxNativeZoom: 21,
++                    maxNativeZoom: 19,
+                     maxZoom: 22,
+                     keepBuffer: 4,
+                     tileSize: 256,
+@@ -201,24 +233,12 @@ class _LiveMapViewState extends State<LiveMapView> {
+                 // 5. Live worker pins
+                 _buildWorkerMarkerLayer(mapSvc, trackerState),
+               ],
+-            ),
+-
+-            // ── Top bar: Map controls ─────────────────────────────────────────
+-            Positioned(
+-              top: 12,
+-              left: 12,
+-              right: 12,
+-              child: _buildMapControls(mapSvc, trackerState),
+-            ),
+-
+-            // ── Bottom bar: Connection status ─────────────────────────────────
+-            Positioned(
+               bottom: 12,
+               left: 12,
+               child: _buildConnectionBadge(mapSvc),
+             ),
+ 
+-            // ── Drawing instructions overlay ──────────────────────────────────
++            // ── Drawing instructions overlay ──────────────────────────────────
+             if (_isDrawingGeofence)
+               Positioned(
+                 bottom: 12,
+@@ -231,9 +251,9 @@ class _LiveMapViewState extends State<LiveMapView> {
+     );
+   }
+ 
+-  // ── Geofence Layer ──────────────────────────────────────────────────────────
+-  // Zoom < 12  → compact icon pin per geofence (doesn't clutter zoomed-out view)
+-  // Zoom >= 12 → full circle / polygon shape as normal
++  // ── Geofence Layer ──────────────────────────────────────────────────────────
++  // Zoom < 12  ├óΓÇáΓÇÖ compact icon pin per geofence (doesn't clutter zoomed-out view)
++  // Zoom >= 12 ├óΓÇáΓÇÖ full circle / polygon shape as normal
+ 
+   static const double _geofenceIconZoomThreshold = 12.0;
+ 
+@@ -243,41 +263,6 @@ class _LiveMapViewState extends State<LiveMapView> {
+ 
+     // 1. Build shapes (only when zoomed in enough)
+     final circles = <CircleMarker>[];
+-    final polygons = <Polygon>[];
+-
+-    if (_currentZoom >= _geofenceIconZoomThreshold) {
+-      for (final g in geofences) {
+-        final color = hexToColor(g.color);
+-        if (g.type == GeofenceShape.circle && g.center != null && g.radiusM != null) {
+-          circles.add(CircleMarker(
+-            point: g.center!,
+-            radius: g.radiusM!,
+-            useRadiusInMeter: true,
+-            color: color.withOpacity(0.08),
+-            borderColor: color.withOpacity(0.7),
+-            borderStrokeWidth: 2,
+-          ));
+-        } else if (g.type == GeofenceShape.polygon && g.polygon != null) {
+-          polygons.add(Polygon(
+-            points: g.polygon!,
+-            color: color.withOpacity(0.08),
+-            borderColor: color.withOpacity(0.7),
+-            borderStrokeWidth: 2,
+-          ));
+-        }
+-      }
+-    }
+-
+-    // 2. Build icon pin markers (always visible!)
+-    final markers = geofences.map((g) {
+-      // Determine center point
+-      LatLng? center;
+-      if (g.type == GeofenceShape.circle && g.center != null) {
+-        center = g.center;
+-      } else if (g.type == GeofenceShape.polygon && g.polygon != null && g.polygon!.isNotEmpty) {
+-        // Compute centroid of polygon
+-        final pts = g.polygon!;
+-        center = LatLng(
+           pts.map((p) => p.latitude).reduce((a, b) => a + b) / pts.length,
+           pts.map((p) => p.longitude).reduce((a, b) => a + b) / pts.length,
+         );
+@@ -286,7 +271,7 @@ class _LiveMapViewState extends State<LiveMapView> {
+ 
+       final color = hexToColor(g.color);
+       final isCircle = g.type == GeofenceShape.circle;
+-      final shortName = g.name.length > 14 ? '${g.name.substring(0, 12)}…' : g.name;
++      final shortName = g.name.length > 14 ? '${g.name.substring(0, 12)}├óΓé¼┬ª' : g.name;
+ 
+       return Marker(
+         point: center,
+@@ -349,7 +334,7 @@ class _LiveMapViewState extends State<LiveMapView> {
+     ]);
+   }
+ 
+-  // ── Drawing Preview Layer ───────────────────────────────────────────────────
++  // ── Drawing Preview Layer ───────────────────────────────────────────────────
+ 
+   Widget _buildDrawingPreviewLayer() {
+     if (_drawingType == GeofenceShape.circle) {
+@@ -423,7 +408,7 @@ class _LiveMapViewState extends State<LiveMapView> {
+     }
+   }
+ 
+-  // ── Trail Layer ─────────────────────────────────────────────────────────────
++  // ── Trail Layer ─────────────────────────────────────────────────────────────
+ 
+   Widget _buildTrailLayer(MapService mapSvc, TrackerState trackerState) {
+     final polylines = <Polyline>[];
+@@ -701,7 +686,7 @@ class _LiveMapViewState extends State<LiveMapView> {
+     );
+   }
+ 
+-  // ── Map Controls ────────────────────────────────────────────────────────────
++  // ── Map Controls ────────────────────────────────────────────────────────────
+ 
+   Widget _buildMapControls(MapService mapSvc, TrackerState trackerState) {
+     return Row(
+@@ -716,6 +701,7 @@ class _LiveMapViewState extends State<LiveMapView> {
+           child: const Row(
+             mainAxisSize: MainAxisSize.min,
+             children: [
++              Icon(Icons.satellite_alt, color: Color(0xFF00BFA5), size: 13),
+               Icon(Icons.satellite_alt, color: Color(0xFF00BFA5), size: 13),
+               SizedBox(width: 5),
+               Text('Live Field Map', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+@@ -736,6 +722,48 @@ class _LiveMapViewState extends State<LiveMapView> {
+                   label: 'Fences',
+                   active: _showGeofences,
+                   onTap: () => setState(() => _showGeofences = !_showGeofences),
++  // ── Map Controls ────────────────────────────────────────────────────────────
++  Widget _buildMapControls(MapService mapSvc, TrackerState trackerState) {
++    return Row(
++      children: [
++        // Title badge
++        Container(
++          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
++          decoration: BoxDecoration(
++            color: Colors.black.withOpacity(0.8),
++            borderRadius: BorderRadius.circular(8),
++          ),
++          child: const Row(
++            mainAxisSize: MainAxisSize.min,
++            children: [
++              Icon(Icons.satellite_alt, color: Color(0xFF00BFA5), size: 13),
++              SizedBox(width: 5),
++              Text('Live Field Map', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
++            ],
++          ),
++        ),
++        const SizedBox(width: 6),
++        // All right-side controls in a flexible scrollable row to prevent overflow
++        Flexible(
++          child: SingleChildScrollView(
++            scrollDirection: Axis.horizontal,
++            child: Row(
++              mainAxisSize: MainAxisSize.min,
++              children: [
++                // Toggle: Geofences
++                 _mapToggleBtn(
++                  icon: Icons.people,
++                  label: 'Workers',
++                  active: _showSidebar,
++                  onTap: () => setState(() => _showSidebar = !_showSidebar),
++                ),
++                const SizedBox(width: 5),
++                // Toggle: Fences
++                _mapToggleBtn(
++                  icon: Icons.radio_button_unchecked,
++                  label: 'Fences',
++                  active: _showGeofences,
++                  onTap: () => setState(() => _showGeofences = !_showGeofences),
+                 ),
+                 const SizedBox(width: 5),
+                 // Toggle: Trails
+@@ -751,7 +779,7 @@ class _LiveMapViewState extends State<LiveMapView> {
+                 _mapIconBtn(
+                   icon: Icons.fit_screen,
+                   tooltip: 'Fit all workers',
+-                  onTap: () => _fitAllWorkers(mapSvc),
++                  onTap: () => _fitAllWorkers(mapSvc, trackerState),
+                 ),
+                 const SizedBox(width: 5),
+                 // Center on my location
+@@ -785,48 +813,6 @@ class _LiveMapViewState extends State<LiveMapView> {
+                 ),
+               ],
+             ),
+-          ),
+-        ),
+-      ],
+-    );
+-  }
+-
+-  Widget _styleSegmentBtn(MapStyle style, IconData icon, String label) {
+-    final active = _mapStyle == style;
+-    return GestureDetector(
+-      onTap: () => setState(() => _mapStyle = style),
+-      child: AnimatedContainer(
+-        duration: const Duration(milliseconds: 200),
+-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+-        decoration: BoxDecoration(
+-          color: active ? const Color(0xFF00BFA5).withOpacity(0.15) : Colors.transparent,
+-          borderRadius: BorderRadius.circular(6),
+-        ),
+-        child: Row(
+-          mainAxisSize: MainAxisSize.min,
+-          children: [
+-            Icon(
+-              icon,
+-              color: active ? const Color(0xFF00BFA5) : Colors.grey,
+-              size: 11,
+-            ),
+-            const SizedBox(width: 4),
+-            Text(
+-              label,
+-              style: TextStyle(
+-                color: active ? const Color(0xFF00BFA5) : Colors.grey,
+-                fontSize: 9,
+-                fontWeight: FontWeight.bold,
+-              ),
+-            ),
+-          ],
+-        ),
+-      ),
+-    );
+-  }
+-
+-  Widget _mapToggleBtn({
+-    required IconData icon,
+     required String label,
+     required bool active,
+     Color activeColor = const Color(0xFF00BFA5),
+@@ -847,7 +833,6 @@ class _LiveMapViewState extends State<LiveMapView> {
+           Text(label,
+               style: TextStyle(
+                   color: active ? activeColor : Colors.grey,
+-                  fontSize: 11,
+                   fontWeight: FontWeight.bold)),
+         ]),
+       ),
+@@ -900,10 +885,11 @@ class _LiveMapViewState extends State<LiveMapView> {
+     );
+   }
+ 
+-  // ── Geofence Drawing Panel ──────────────────────────────────────────────────
++  // ── Geofence Drawing Panel ──────────────────────────────────────────────────
+ 
+   Widget _buildDrawingPanel(MapService mapSvc) {
+     return Container(
++      width: 240,
+       width: 240,
+       padding: const EdgeInsets.all(14),
+       decoration: BoxDecoration(
+@@ -941,8 +927,7 @@ class _LiveMapViewState extends State<LiveMapView> {
+             const SizedBox(height: 10),
+ 
+             // Geofence Name
+-            TextField(
+-              controller: _geofenceNameCtrl,
++         
+               style: const TextStyle(color: Colors.white, fontSize: 12),
+               decoration: const InputDecoration(
+                 labelText: 'Geofence Name',
+@@ -1023,8 +1008,8 @@ class _LiveMapViewState extends State<LiveMapView> {
+               if (_drawingType == GeofenceShape.circle) ...[
+                 Text(
+                   _drawingCenter == null
+-                      ? '📍 Tap the map to set the center point.'
+-                      : '✅ Center: ${_drawingCenter!.latitude.toStringAsFixed(4)}, ${_drawingCenter!.longitude.toStringAsFixed(4)}',
++                      ? '├░┼╕ΓÇ£┬ì Tap the map to set the center point.'
++                      : '├ó┼ô… Center: ${_drawingCenter!.latitude.toStringAsFixed(4)}, ${_drawingCenter!.longitude.toStringAsFixed(4)}',
+                   style: const TextStyle(color: Colors.white70, fontSize: 10),
+                 ),
+                 const SizedBox(height: 10),
+@@ -1039,7 +1024,7 @@ class _LiveMapViewState extends State<LiveMapView> {
+                 ),
+               ] else ...[
+                 Text(
+-                  '📍 Tap map vertices to draw polygon (${_drawingPolygonPoints.length} added)',
++                  '├░┼╕ΓÇ£┬ì Tap map vertices to draw polygon (${_drawingPolygonPoints.length} added)',
+                   style: const TextStyle(color: Colors.white70, fontSize: 10),
+                 ),
+                 const SizedBox(height: 8),
+@@ -1177,12 +1162,13 @@ class _LiveMapViewState extends State<LiveMapView> {
+           filled: true,
+           fillColor: const Color(0xFF13131A),
+           border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide.none),
++          border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide.none),
+         ),
+       ),
+     );
+   }
+ 
+-  // ── Worker Sidebar ──────────────────────────────────────────────────────────
++  // ── Worker Sidebar ──────────────────────────────────────────────────────────
+ 
+   Widget _buildWorkerSidebar(MapService mapSvc, TrackerState trackerState) {
+     return Container(
+@@ -1232,7 +1218,6 @@ class _LiveMapViewState extends State<LiveMapView> {
+                 final isSelected = _selectedWorkerId == worker.id;
+ 
+                 return GestureDetector(
+-                  onTap: () => _focusWorker(worker.id, liveLoc),
+                   child: AnimatedContainer(
+                     duration: const Duration(milliseconds: 200),
+                     margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+@@ -1363,7 +1348,7 @@ class _LiveMapViewState extends State<LiveMapView> {
+     );
+   }
+ 
+-  // ── Interactions ────────────────────────────────────────────────────────────
++  // ── Interactions ────────────────────────────────────────────────────────────
+ 
+   void _onMapTap(TapPosition tapPos, LatLng latlng) {
+     if (_drawingType == GeofenceShape.circle) {
+@@ -1542,27 +1527,6 @@ class _LiveMapViewState extends State<LiveMapView> {
+         title: Row(
+           children: [
+             const Icon(Icons.person, color: Color(0xFF00BFA5), size: 20),
+-            const SizedBox(width: 8),
+-            Text(loc.workerName, style: const TextStyle(color: Colors.white, fontSize: 15)),
+-          ],
+-        ),
+-        content: Column(
+-          mainAxisSize: MainAxisSize.min,
+-          crossAxisAlignment: CrossAxisAlignment.start,
+-          children: [
+-            _popupRow(Icons.badge, 'Employee ID', worker.employeeId),
+-            _popupRow(Icons.work, 'Designation', worker.designation),
+-            _popupRow(Icons.business, 'Department', worker.department),
+-            _popupRow(Icons.location_on, 'Coordinates',
+-                '${loc.lat.toStringAsFixed(5)}, ${loc.lng.toStringAsFixed(5)}'),
+-            _popupRow(Icons.gps_fixed, 'Accuracy', '±${loc.accuracy.toStringAsFixed(1)} m'),
+-            _popupRow(Icons.access_time, 'Last Update',
+-                DateFormat('hh:mm:ss a').format(loc.timestamp.toLocal())),
+-            _popupRow(
+-              loc.isOnShift ? Icons.check_circle : Icons.circle_outlined,
+-              'Shift Status',
+-              loc.isOnShift ? 'On Shift' : 'Off Shift',
+-            ),
+             _popupRow(
+               loc.isOnline ? Icons.wifi : Icons.wifi_off,
+               'Connection',
+@@ -1653,6 +1617,85 @@ class _LiveMapViewState extends State<LiveMapView> {
+                           border: color == c ? Border.all(color: Colors.white, width: 2) : null,
+                         ),
+                       ),
++                    ),
++                ],
++              ),
++            ],
++          ),
++          actions: [
++            TextButton(
++              onPressed: () => Navigator.pop(ctx),
++                  for (final c in ['#00BFA5', '#FF6D00', '#7C4DFF', '#FF4081', '#00B0FF'])
++                    GestureDetector(
++                      onTap: () => setS(() => color = c),
++                      child: Container(
++                        width: 20,
++                        height: 20,
++                        margin: const EdgeInsets.only(left: 6),
++                        decoration: BoxDecoration(
++                          shape: BoxShape.circle,
++                          color: hexToColor(c),
++                          border: color == c ? Border.all(color: Colors.white, width: 2) : null,
++                        ),
++                      ),
++                    ),
++                ],
++              ),
++            ],
++          ),
++          actions: [
++            TextButton(
++              onPressed: () => Navigator.pop(ctx),
++              child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
++            ),
++            ElevatedButton(
++              style: ElevatedButton.styleFrom(
++                  backgroundColor: const Color(0xFF00BFA5), foregroundColor: Colors.black),
++              onPressed: () async {
++                final updated = g.copyWith(
++                  name: nameCtrl.text.trim(),
++                  radiusM: radius,
++                  color: color,
++                );
++                await mapSvc.updateGeofence(updated);
++                if (ctx.mounted) Navigator.pop(ctx);
++              },
++              child: const Text('Save Changes'),
++            ),
++          ],
++        ),
++      ),
++    );
++  }
++}
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
+                     ),
+                 ],
+               ),
+@@ -1683,3 +1726,303 @@ class _LiveMapViewState extends State<LiveMapView> {
+     );
+   }
+ }
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++    );
++    return LatLng(hb.latitude, hb.longitude);
++  }
++
++  void _onSearchChanged(String query) {
++    _debounceTimer?.cancel();
++    if (query.trim().length < 3) {
++      setState(() {
++        _placeSuggestions.clear();
++      });
++      return;
++    }
++    _debounceTimer = Timer(const Duration(milliseconds: 600), () {
++      _searchPlaces(query.trim());
++    });
++  }
++
++  Future<void> _searchPlaces(String query) async {
++    if (!mounted) return;
++    setState(() => _isSearchingPlaces = true);
++    try {
++      final url = Uri.parse('https://nominatim.openstreetmap.org/search?q=${Uri.encodeComponent(query)}&format=json&limit=5');
++      final response = await http.get(url, headers: {'User-Agent': 'com.sgs.field_tracker'});
++      if (response.statusCode == 200) {
++        final List data = jsonDecode(response.body);
++        if (mounted) {
++          setState(() {
++            _placeSuggestions = data.map((item) => {
++              'display_name': item['display_name'] as String,
++              'lat': double.parse(item['lat'] as String),
++              'lon': double.parse(item['lon'] as String),
++            }).toList();
++          });
++        }
++      }
++    } catch (e) {
++      debugPrint('Nominatim geocoding error: $e');
++    } finally {
++      if (mounted) {
++        setState(() => _isSearchingPlaces = false);
++      }
++    }
++  }
++
++  Widget _buildSearchBar(BuildContext context, MapService mapSvc, TrackerState trackerState) {
++    return Column(
++      mainAxisSize: MainAxisSize.min,
++      crossAxisAlignment: CrossAxisAlignment.start,
++      children: [
++        Container(
++          width: 340,
++          decoration: BoxDecoration(
++            color: const Color(0xFF1E1E26).withOpacity(0.95),
++            borderRadius: BorderRadius.circular(8),
++            border: Border.all(color: const Color(0xFF2D2D38)),
++            boxShadow: [
++              BoxShadow(
++                color: Colors.black.withOpacity(0.4),
++                blurRadius: 8,
++                offset: const Offset(0, 2),
++              ),
++            ],
++          ),
++          child: TextField(
++            controller: _searchCtrl,
++            style: const TextStyle(color: Colors.white, fontSize: 13),
++            decoration: InputDecoration(
++              hintText: 'Search site, worker, or location...',
++              hintStyle: const TextStyle(color: Colors.grey, fontSize: 12),
++              prefixIcon: const Icon(Icons.search, color: Colors.tealAccent, size: 18),
++              suffixIcon: _searchQuery.isNotEmpty
++                  ? IconButton(
++                      icon: const Icon(Icons.clear, color: Colors.grey, size: 16),
++                      onPressed: () {
++                        setState(() {
++                          _searchCtrl.clear();
++                          _searchQuery = '';
++                          _placeSuggestions.clear();
++                        });
++                      },
++                    )
++                  : null,
++              border: InputBorder.none,
++              contentPadding: const EdgeInsets.symmetric(vertical: 12),
++            ),
++            onChanged: (val) {
++              setState(() {
++                _searchQuery = val;
++              });
++              _onSearchChanged(val);
++            },
++          ),
++        ),
++        if (_searchQuery.isNotEmpty) ...[
++          const SizedBox(height: 4),
++          Container(
++            width: 340,
++            constraints: const BoxConstraints(maxHeight: 250),
++            decoration: BoxDecoration(
++              color: const Color(0xFF1E1E26).withOpacity(0.95),
++              borderRadius: BorderRadius.circular(8),
++              border: Border.all(color: const Color(0xFF2D2D38)),
++              boxShadow: [
++                BoxShadow(
++                  color: Colors.black.withOpacity(0.4),
++                  blurRadius: 8,
++                ),
++              ],
++            ),
++            child: ClipRRect(
++              borderRadius: BorderRadius.circular(8),
++              child: SingleChildScrollView(
++                child: Column(
++                  mainAxisSize: MainAxisSize.min,
++                  children: [
++                    _buildSiteSuggestions(mapSvc),
++                    _buildWorkerSuggestions(trackerState, mapSvc),
++                    _buildPlaceSuggestions(),
++                  ],
++                ),
++              ),
++            ),
++          ),
++        ],
++      ],
++    );
++  }
++
++  Widget _buildSiteSuggestions(MapService mapSvc) {
++    final query = _searchQuery.toLowerCase();
++    final matchingFences = mapSvc.geofences.where((g) =>
++        g.name.toLowerCase().contains(query) ||
++        g.code.toLowerCase().contains(query)).toList();
++
++    if (matchingFences.isEmpty) return const SizedBox.shrink();
++
++    return Column(
++      crossAxisAlignment: CrossAxisAlignment.start,
++      mainAxisSize: MainAxisSize.min,
++      children: [
++        Container(
++          width: double.infinity,
++          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
++          color: const Color(0xFF13131A),
++          child: const Text('ASSIGNED SITES', style: TextStyle(color: Colors.tealAccent, fontSize: 9, fontWeight: FontWeight.bold)),
++        ),
++        ...matchingFences.map((g) {
++          LatLng? dest;
++          if (g.type == GeofenceShape.circle && g.center != null) {
++            dest = g.center;
++          } else if (g.type == GeofenceShape.polygon && g.polygon != null && g.polygon!.isNotEmpty) {
++            dest = g.polygon!.first;
++          }
++          return ListTile(
++            dense: true,
++            visualDensity: VisualDensity.compact,
++            title: Text(g.name, style: const TextStyle(color: Colors.white, fontSize: 12)),
++            subtitle: Text('Code: ${g.code} ├óΓé¼┬ó ${g.type.name}', style: const TextStyle(color: Colors.grey, fontSize: 10)),
++            leading: const Icon(Icons.location_on, color: Colors.tealAccent, size: 16),
++            onTap: () {
++              if (dest != null) {
++                _mapController.move(dest, 15);
++              }
++              setState(() {
++                _searchCtrl.clear();
++                _searchQuery = '';
++                _placeSuggestions.clear();
++              });
++            },
++          );
++        }),
++      ],
++    );
++  }
++
++  Widget _buildWorkerSuggestions(TrackerState trackerState, MapService mapSvc) {
++    final query = _searchQuery.toLowerCase();
++    final matchingWorkers = trackerState.workers.where((w) =>
++        w.name.toLowerCase().contains(query) ||
++        w.employeeId.toLowerCase().contains(query)).toList();
++
++    if (matchingWorkers.isEmpty) return const SizedBox.shrink();
++
++    return Column(
++      crossAxisAlignment: CrossAxisAlignment.start,
++      mainAxisSize: MainAxisSize.min,
++      children: [
++        Container(
++          width: double.infinity,
++          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
++          color: const Color(0xFF13131A),
++          child: const Text('WORKERS', style: TextStyle(color: Colors.orangeAccent, fontSize: 9, fontWeight: FontWeight.bold)),
++        ),
++        ...matchingWorkers.map((w) {
++          return ListTile(
++            dense: true,
++            visualDensity: VisualDensity.compact,
++            title: Text(w.name, style: const TextStyle(color: Colors.white, fontSize: 12)),
++            subtitle: Text('ID: ${w.employeeId} ├óΓé¼┬ó ${w.designation}', style: const TextStyle(color: Colors.grey, fontSize: 10)),
++            leading: const Icon(Icons.person, color: Colors.orangeAccent, size: 16),
++            onTap: () {
++              final pos = _getWorkerPosition(w, mapSvc, trackerState);
++              _mapController.move(pos, 15);
++              setState(() {
++                _selectedWorkerId = w.id;
++                _searchCtrl.clear();
++                _searchQuery = '';
++                _placeSuggestions.clear();
++              });
++            },
++          );
++        }),
++      ],
++    );
++  }
++
++  Widget _buildPlaceSuggestions() {
++    if (_isSearchingPlaces) {
++      return const Padding(
++        padding: EdgeInsets.all(8.0),
++        child: Center(
++          child: SizedBox(
++            width: 16,
++            height: 16,
++            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.tealAccent),
++          ),
++        ),
++      );
++    }
++
++    if (_placeSuggestions.isEmpty) return const SizedBox.shrink();
++
++    return Column(
++      crossAxisAlignment: CrossAxisAlignment.start,
++      mainAxisSize: MainAxisSize.min,
++      children: [
++        Container(
++          width: double.infinity,
++          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
++          color: const Color(0xFF13131A),
++          child: const Text('GLOBAL LOCATIONS', style: TextStyle(color: Colors.blueAccent, fontSize: 9, fontWeight: FontWeight.bold)),
++        ),
++        ..._placeSuggestions.map((p) {
++          final String name = p['display_name'] as String;
++          final double lat = p['lat'] as double;
++          final double lon = p['lon'] as double;
++          return ListTile(
++            dense: true,
++            visualDensity: VisualDensity.compact,
++            title: Text(name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 11)),
++            leading: const Icon(Icons.public, color: Colors.blueAccent, size: 16),
++            onTap: () {
++              _mapController.move(LatLng(lat, lon), 14);
++              setState(() {
++                _searchCtrl.clear();
++                _searchQuery = '';
++                _placeSuggestions.clear();
++              });
++            },
++          );
++        }),
++      ],
++    );
++  }
++}

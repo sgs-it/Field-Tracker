@@ -21,6 +21,7 @@ class TrackerState extends ChangeNotifier {
   List<TamperAlert> _tamperAlerts = [];
   List<HeartbeatLog> _heartbeatLogs = [];
   List<AppNotification> _notifications = [];
+  List<Report> _reports = [];
 
   // Active user selections
   String _activeRoleId = 'Admin'; // Admin, Engineer, Supervisor, Worker
@@ -195,6 +196,7 @@ class TrackerState extends ChangeNotifier {
     await _loadTamperAlertsFromStorage();
     await _loadHeartbeatLogsFromStorage();
     await _loadNotificationsFromStorage();
+    await _loadReportsFromStorage();
     _seedInitialData();
     _initializeCurrentLocation();
     _geofencePollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
@@ -282,6 +284,29 @@ class TrackerState extends ChangeNotifier {
     }
   }
 
+  Future<void> _loadReportsFromStorage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonStr = prefs.getString('sgs_field_tracker_reports');
+      if (jsonStr != null && jsonStr.isNotEmpty) {
+        final List<dynamic> list = jsonDecode(jsonStr);
+        _reports = list.map((e) => Report.fromJson(e as Map<String, dynamic>)).toList();
+      }
+    } catch (e) {
+      debugPrint('Error loading reports from local storage: $e');
+    }
+  }
+
+  Future<void> _saveReportsToStorage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonStr = jsonEncode(_reports.map((e) => e.toJson()).toList());
+      await prefs.setString('sgs_field_tracker_reports', jsonStr);
+    } catch (e) {
+      debugPrint('Error saving reports to local storage: $e');
+    }
+  }
+
   Future<void> _saveAssignmentsToStorage() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -324,7 +349,22 @@ class TrackerState extends ChangeNotifier {
       final jsonStr = prefs.getString('sgs_field_tracker_attendance');
       if (jsonStr != null && jsonStr.isNotEmpty) {
         final List<dynamic> list = jsonDecode(jsonStr);
-        _attendanceRecords = list.map((e) => AttendanceRecord.fromJson(e as Map<String, dynamic>)).toList();
+        final rawRecords = list.map((e) => AttendanceRecord.fromJson(e as Map<String, dynamic>)).toList();
+        
+        // Deduplicate records by workerId and date (keep the latest one or the one with most info)
+        final Map<String, AttendanceRecord> deduped = {};
+        for (var r in rawRecords) {
+          final key = '${r.workerId}_${DateFormat('yyyyMMdd').format(r.date)}';
+          if (!deduped.containsKey(key)) {
+            deduped[key] = r;
+          } else {
+            // keep the one with shiftStart if the other doesn't have it
+            if (r.shiftStart != null && deduped[key]!.shiftStart == null) {
+              deduped[key] = r;
+            }
+          }
+        }
+        _attendanceRecords = deduped.values.toList();
       } else {
         _attendanceRecords = [];
       }
@@ -557,6 +597,48 @@ class TrackerState extends ChangeNotifier {
     notifyListeners();
   }
 
+  // --- Reports ---
+  List<Report> get allReports => _reports;
+
+  void submitReport(Report report) {
+    _reports.insert(0, report);
+    _saveReportsToStorage();
+    notifyListeners();
+  }
+
+  void updateReport(String reportId, {
+    String? title,
+    String? description,
+    String? category,
+    String? siteId,
+    ReportStatus? status,
+    ReportPriority? priority,
+    String? adminComments,
+    String? assignedAdminId,
+  }) {
+    int index = _reports.indexWhere((r) => r.id == reportId);
+    if (index != -1) {
+      _reports[index] = _reports[index].copyWith(
+        title: title,
+        description: description,
+        category: category,
+        siteId: siteId,
+        status: status,
+        priority: priority,
+        adminComments: adminComments,
+        assignedAdminId: assignedAdminId,
+      );
+      _saveReportsToStorage();
+      notifyListeners();
+    }
+  }
+
+  void deleteReport(String reportId) {
+    _reports.removeWhere((r) => r.id == reportId);
+    _saveReportsToStorage();
+    notifyListeners();
+  }
+
   void _seedInitialData() {
     if (_sites.isNotEmpty) return;
     // 1. Seed Sites (including accommodation)
@@ -567,6 +649,9 @@ class TrackerState extends ChangeNotifier {
 
     // 4. Initialize Attendance Records for Today
     for (var worker in _workers) {
+      String expectedId = 'att_${worker.id}_${DateFormat('yyyyMMdd').format(today)}';
+      if (_attendanceRecords.any((r) => r.id == expectedId)) continue;
+      
       // Find assignments for this worker
       var workerAssigns = _assignments.where((a) => a.workerId == worker.id && isSameDay(a.date, today)).toList();
       
@@ -580,7 +665,7 @@ class TrackerState extends ChangeNotifier {
       }
 
       _attendanceRecords.add(AttendanceRecord(
-        id: 'att_${worker.id}_${DateFormat('yyyyMMdd').format(today)}',
+        id: expectedId,
         workerId: worker.id,
         date: today,
         visits: visits,
@@ -717,6 +802,7 @@ class TrackerState extends ChangeNotifier {
       _recalculateAttendanceStatus(att);
       _connectWorkerWs();
       _startGpsTracking();
+      _saveAttendanceRecordsToStorage();
       saveAttendanceRecordToBackend(att);
       notifyListeners();
     }
@@ -750,6 +836,7 @@ class TrackerState extends ChangeNotifier {
       _recalculateAttendanceStatus(att);
       _closeWorkerWs();
       _stopGpsTracking();
+      _saveAttendanceRecordsToStorage();
       saveAttendanceRecordToBackend(att);
       notifyListeners();
     }
@@ -1085,6 +1172,7 @@ class TrackerState extends ChangeNotifier {
     var itemIndex = visit.checklistAtVisit.indexWhere((i) => i.id == itemId);
     if (itemIndex != -1) {
       visit.checklistAtVisit[itemIndex].isCompleted = !visit.checklistAtVisit[itemIndex].isCompleted;
+      _saveAttendanceRecordsToStorage();
       saveAttendanceRecordToBackend(att);
       notifyListeners();
     }
@@ -1105,6 +1193,7 @@ class TrackerState extends ChangeNotifier {
     var visit = att.visits[visitIndex];
     visit.comments = comments;
     visit.photoPath = photoPath;
+    _saveAttendanceRecordsToStorage();
     saveAttendanceRecordToBackend(att);
     notifyListeners();
   }
@@ -1811,7 +1900,43 @@ class TrackerState extends ChangeNotifier {
       final res = await http.get(Uri.parse('$kServerBaseUrl/api/attendance')).timeout(const Duration(seconds: 5));
       if (res.statusCode == 200) {
         final list = jsonDecode(res.body) as List<dynamic>;
-        _attendanceRecords = list.map((e) => AttendanceRecord.fromJson(e as Map<String, dynamic>)).toList();
+        final serverRecords = list.map((e) => AttendanceRecord.fromJson(e as Map<String, dynamic>)).toList();
+
+        // MERGE: Don't blindly replace local state. Keep local records that have
+        // active data (shift started, checklist ticked) to avoid the "revert" bug.
+        for (final serverRecord in serverRecords) {
+          final localIndex = _attendanceRecords.indexWhere((r) => r.id == serverRecord.id);
+          if (localIndex == -1) {
+            // New record from server that we don't have locally — add it
+            _attendanceRecords.add(serverRecord);
+          } else {
+            final local = _attendanceRecords[localIndex];
+            // Check if local record has active data worth keeping
+            final localHasShift = local.shiftStart != null;
+            final localHasChecklist = local.visits.any(
+              (v) => v.checklistAtVisit.any((c) => c.isCompleted),
+            );
+            final serverHasShift = serverRecord.shiftStart != null;
+            final serverHasChecklist = serverRecord.visits.any(
+              (v) => v.checklistAtVisit.any((c) => c.isCompleted),
+            );
+
+            // Only replace local with server if server data is "richer" (has more info)
+            // OR if local has no meaningful changes
+            if (!localHasShift && !localHasChecklist) {
+              // Local is empty/default — safe to replace with server data
+              _attendanceRecords[localIndex] = serverRecord;
+            } else if (serverHasShift && !localHasShift) {
+              // Server has shift info that local doesn't — use server
+              _attendanceRecords[localIndex] = serverRecord;
+            } else if (serverHasChecklist && !localHasChecklist) {
+              // Server has checklist progress that local doesn't — use server
+              _attendanceRecords[localIndex] = serverRecord;
+            }
+            // Otherwise keep local record as-is (local changes win)
+          }
+        }
+
         _saveAttendanceRecordsToStorage();
         notifyListeners();
       }

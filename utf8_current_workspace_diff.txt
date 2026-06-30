@@ -1,0 +1,4444 @@
+﻿diff --git a/backend/.env b/backend/.env
+index 6c5f69b..e8b08c6 100644
+--- a/backend/.env
++++ b/backend/.env
+@@ -1,6 +1,6 @@
+ DB_HOST=127.0.0.1
+-DB_PORT=5433
++DB_PORT=5432
+ DB_USER=postgres
+-DB_PASSWORD=postgres
++DB_PASSWORD=sebil364
+ DB_NAME=field_tracker
+ PORT=8080
+diff --git a/sgs_field_tracker/lib/dashboard_view.dart b/sgs_field_tracker/lib/dashboard_view.dart
+index cb5dccb..e20c6b8 100644
+--- a/sgs_field_tracker/lib/dashboard_view.dart
++++ b/sgs_field_tracker/lib/dashboard_view.dart
+@@ -8,7 +8,7 @@ import 'tracker_state.dart';
+ import 'models.dart';
+ import 'geofence_model.dart';
+ import 'map_service.dart';
+-import 'live_map_view.dart';
++import 'live_map_view.dart' show LiveMapView, MapStyle, hexToColor;
+ import 'worker_location.dart';
+ import 'dart:math';
+ 
+@@ -68,25 +68,35 @@ class _DashboardViewState extends State<DashboardView> {
+ 
+     return Scaffold(
+       backgroundColor: const Color(0xFF13131A),
+-      body: Row(
++      body: Stack(
+         children: [
+-          // Sidebar (Visible only on desktop/large screens)
+-          if (isDesktop) _buildSidebar(context, state),
+-          
+-          // Main Body Content
+-          Expanded(
+-            child: Column(
+-              crossAxisAlignment: CrossAxisAlignment.start,
+-              children: [
+-                _buildTopNav(context, state, isDesktop),
+-                Expanded(
+-                  child: Container(
+-                    padding: const EdgeInsets.all(24),
+-                    child: _buildActiveTabContent(context, state),
+-                  ),
++          Row(
++            children: [
++              // Sidebar (Visible only on desktop/large screens)
++              if (isDesktop) _buildSidebar(context, state),
++              
++              // Main Body Content
++              Expanded(
++                child: Column(
++                  crossAxisAlignment: CrossAxisAlignment.start,
++                  children: [
++                    _buildTopNav(context, state, isDesktop),
++                    Expanded(
++                      child: Container(
++                        padding: const EdgeInsets.all(24),
++                        child: _buildActiveTabContent(context, state),
++                      ),
++                    ),
++                  ],
+                 ),
+-              ],
+-            ),
++              ),
++            ],
++          ),
++          Positioned(
++            top: 80,
++            right: 24,
++            width: 320,
++            child: _buildFloatingNotifications(context, state),
+           ),
+         ],
+       ),
+@@ -348,6 +358,8 @@ class _DashboardViewState extends State<DashboardView> {
+   }
+ 
+   Widget _buildDashboard(BuildContext context, TrackerState state) {
++    final isDesktop = MediaQuery.of(context).size.width > 900;
++
+     final filteredWorkers = _selectedDepartmentFilter == 'All'
+         ? state.workers
+         : state.workers.where((w) => w.department == _selectedDepartmentFilter).toList();
+@@ -447,29 +459,192 @@ class _DashboardViewState extends State<DashboardView> {
+           ),
+           const SizedBox(height: 24),
+ 
+-          Row(
+-            children: [
+-              _buildDashboardStatCard('Total Workers', '$totalWorkers', null, Colors.white),
+-              const SizedBox(width: 16),
+-              _buildDashboardStatCard('Present', '$presentCount', '$presentPct%', const Color(0xFF00BFA5)),
+-              const SizedBox(width: 16),
+-              _buildDashboardStatCard('Pending', '$pendingCount', '$pendingPct%', const Color(0xFFFF9800)),
+-              const SizedBox(width: 16),
+-              _buildDashboardStatCard('Absent', '$absentCount', '$absentPct%', const Color(0xFFF44336)),
+-              const SizedBox(width: 16),
+-              _buildDashboardStatCard('GPS Offline', '$gpsOfflineCount', '$offlinePct%', const Color(0xFFF44336)),
+-            ],
+-          ),
++          if (isDesktop)
++            Row(
++              children: [
++                _buildDashboardStatCard('Total Workers', '$totalWorkers', null, Colors.white),
++                const SizedBox(width: 16),
++                _buildDashboardStatCard('Present', '$presentCount', '$presentPct%', const Color(0xFF00BFA5)),
++                const SizedBox(width: 16),
++                _buildDashboardStatCard('Pending', '$pendingCount', '$pendingPct%', const Color(0xFFFF9800)),
++                const SizedBox(width: 16),
++                _buildDashboardStatCard('Absent', '$absentCount', '$absentPct%', const Color(0xFFF44336)),
++                const SizedBox(width: 16),
++                _buildDashboardStatCard('GPS Offline', '$gpsOfflineCount', '$offlinePct%', const Color(0xFFF44336)),
++              ],
++            )
++          else
++            Column(
++              children: [
++                Row(
++                  children: [
++                    _buildDashboardStatCard('Total Workers', '$totalWorkers', null, Colors.white),
++                    const SizedBox(width: 12),
++                    _buildDashboardStatCard('Present', '$presentCount', '$presentPct%', const Color(0xFF00BFA5)),
++                  ],
++                ),
++                const SizedBox(height: 12),
++                Row(
++                  children: [
++                    _buildDashboardStatCard('Pending', '$pendingCount', '$pendingPct%', const Color(0xFFFF9800)),
++                    const SizedBox(width: 12),
++                    _buildDashboardStatCard('Absent', '$absentCount', '$absentPct%', const Color(0xFFF44336)),
++                  ],
++                ),
++                const SizedBox(height: 12),
++                Row(
++                  children: [
++                    _buildDashboardStatCard('GPS Offline', '$gpsOfflineCount', '$offlinePct%', const Color(0xFFF44336)),
++                  ],
++                ),
++              ],
++            ),
+           const SizedBox(height: 24),
+ 
+-          Row(
+-            crossAxisAlignment: CrossAxisAlignment.start,
+-            children: [
+-              Expanded(
+-                flex: 2,
+-                child: Container(
+-                  height: 480,
+-                  padding: const EdgeInsets.all(20),
++          if (isDesktop)
++            Row(
++              crossAxisAlignment: CrossAxisAlignment.start,
++              children: [
++                Expanded(
++                  flex: 2,
++                  child: Container(
++                    height: 480,
++                    padding: const EdgeInsets.all(20),
++                    decoration: BoxDecoration(
++                      color: const Color(0xFF1E1E26),
++                      borderRadius: BorderRadius.circular(16),
++                      border: Border.all(color: const Color(0xFF2D2D38)),
++                    ),
++                    child: Column(
++                      crossAxisAlignment: CrossAxisAlignment.start,
++                      children: [
++                        Row(
++                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
++                          children: [
++                            const Text(
++                              'Live Workers on Map',
++                              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
++                            ),
++                            Row(
++                              children: [
++                                Container(
++                                  padding: const EdgeInsets.all(2),
++                                  decoration: BoxDecoration(
++                                    color: Colors.black.withOpacity(0.5),
++                                    borderRadius: BorderRadius.circular(8),
++                                    border: Border.all(color: const Color(0xFF2D2D38)),
++                                  ),
++                                  child: Row(
++                                    mainAxisSize: MainAxisSize.min,
++                                    children: [
++                                      _dashboardStyleSegmentBtn(MapStyle.dark, 'Dark'),
++                                      _dashboardStyleSegmentBtn(MapStyle.light, 'Light'),
++                                      _dashboardStyleSegmentBtn(MapStyle.satellite, 'Sat'),
++                                    ],
++                                  ),
++                                ),
++                                const SizedBox(width: 12),
++                                IconButton(
++                                  icon: const Icon(Icons.fullscreen, color: Colors.tealAccent, size: 20),
++                                  tooltip: 'View Full Screen Map',
++                                  constraints: const BoxConstraints(),
++                                  padding: EdgeInsets.zero,
++                                  onPressed: () {
++                                    setState(() {
++                                      _activeTab = 1;
++                                    });
++                                  },
++                                ),
++                              ],
++                            ),
++                          ],
++                        ),
++                        const SizedBox(height: 16),
++                        Expanded(
++                          child: ClipRRect(
++                            borderRadius: BorderRadius.circular(12),
++                            child: Stack(
++                              children: [
++                                _buildDashboardMapPreview(context, state),
++                                Positioned(
++                                  bottom: 16,
++                                  right: 16,
++                                  child: Column(
++                                    children: [
++                                      _buildMapZoomButton(Icons.add, () {
++                                        _dashboardMapController.move(
++                                          _dashboardMapController.camera.center,
++                                          (_dashboardMapController.camera.zoom + 1).clamp(1.0, 22.0),
++                                        );
++                                      }),
++                                      const SizedBox(height: 8),
++                                      _buildMapZoomButton(Icons.remove, () {
++                                        _dashboardMapController.move(
++                                          _dashboardMapController.camera.center,
++                                          (_dashboardMapController.camera.zoom - 1).clamp(1.0, 22.0),
++                                        );
++                                      }),
++                                    ],
++                                  ),
++                                ),
++                              ],
++                            ),
++                          ),
++                        ),
++                      ],
++                    ),
++                  ),
++                ),
++                const SizedBox(width: 24),
++
++                Expanded(
++                  flex: 1,
++                  child: Container(
++                    height: 480,
++                    padding: const EdgeInsets.all(20),
++                    decoration: BoxDecoration(
++                      color: const Color(0xFF1E1E26),
++                      borderRadius: BorderRadius.circular(16),
++                      border: Border.all(color: const Color(0xFF2D2D38)),
++                    ),
++                    child: Column(
++                      crossAxisAlignment: CrossAxisAlignment.start,
++                      children: [
++                        const Text(
++                          'Recent Activity',
++                          style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
++                        ),
++                        const SizedBox(height: 16),
++                        Expanded(
++                          child: _buildRecentActivityFeed(context, state),
++                        ),
++                        const Divider(color: Color(0xFF2D2D38), height: 24),
++                        Center(
++                          child: TextButton(
++                            onPressed: () {
++                              setState(() {
++                                _activeTab = 5; // navigate to Attendance Reports
++                              });
++                            },
++                            child: const Text(
++                              'View All',
++                              style: TextStyle(color: Colors.tealAccent, fontSize: 13, fontWeight: FontWeight.bold),
++                            ),
++                          ),
++                        ),
++                      ],
++                    ),
++                  ),
++                ),
++              ],
++            )
++          else
++            Column(
++              crossAxisAlignment: CrossAxisAlignment.stretch,
++              children: [
++                Container(
++                  height: 350,
++                  padding: const EdgeInsets.all(16),
+                   decoration: BoxDecoration(
+                     color: const Color(0xFF1E1E26),
+                     borderRadius: BorderRadius.circular(16),
+@@ -503,7 +678,7 @@ class _DashboardViewState extends State<DashboardView> {
+                                   ],
+                                 ),
+                               ),
+-                              const SizedBox(width: 12),
++                              const SizedBox(width: 8),
+                               IconButton(
+                                 icon: const Icon(Icons.fullscreen, color: Colors.tealAccent, size: 20),
+                                 tooltip: 'View Full Screen Map',
+@@ -519,7 +694,7 @@ class _DashboardViewState extends State<DashboardView> {
+                           ),
+                         ],
+                       ),
+-                      const SizedBox(height: 16),
++                      const SizedBox(height: 12),
+                       Expanded(
+                         child: ClipRRect(
+                           borderRadius: BorderRadius.circular(12),
+@@ -527,8 +702,8 @@ class _DashboardViewState extends State<DashboardView> {
+                             children: [
+                               _buildDashboardMapPreview(context, state),
+                               Positioned(
+-                                bottom: 16,
+-                                right: 16,
++                                bottom: 12,
++                                right: 12,
+                                 child: Column(
+                                   children: [
+                                     _buildMapZoomButton(Icons.add, () {
+@@ -537,7 +712,7 @@ class _DashboardViewState extends State<DashboardView> {
+                                         (_dashboardMapController.camera.zoom + 1).clamp(1.0, 22.0),
+                                       );
+                                     }),
+-                                    const SizedBox(height: 8),
++                                    const SizedBox(height: 6),
+                                     _buildMapZoomButton(Icons.remove, () {
+                                       _dashboardMapController.move(
+                                         _dashboardMapController.camera.center,
+@@ -554,14 +729,10 @@ class _DashboardViewState extends State<DashboardView> {
+                     ],
+                   ),
+                 ),
+-              ),
+-              const SizedBox(width: 24),
+-
+-              Expanded(
+-                flex: 1,
+-                child: Container(
+-                  height: 480,
+-                  padding: const EdgeInsets.all(20),
++                const SizedBox(height: 24),
++                Container(
++                  height: 350,
++                  padding: const EdgeInsets.all(16),
+                   decoration: BoxDecoration(
+                     color: const Color(0xFF1E1E26),
+                     borderRadius: BorderRadius.circular(16),
+@@ -574,11 +745,11 @@ class _DashboardViewState extends State<DashboardView> {
+                         'Recent Activity',
+                         style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                       ),
+-                      const SizedBox(height: 16),
++                      const SizedBox(height: 12),
+                       Expanded(
+                         child: _buildRecentActivityFeed(context, state),
+                       ),
+-                      const Divider(color: Color(0xFF2D2D38), height: 24),
++                      const Divider(color: Color(0xFF2D2D38), height: 16),
+                       Center(
+                         child: TextButton(
+                           onPressed: () {
+@@ -595,9 +766,8 @@ class _DashboardViewState extends State<DashboardView> {
+                     ],
+                   ),
+                 ),
+-              ),
+-            ],
+-          ),
++              ],
++            ),
+         ],
+       ),
+     );
+@@ -1635,7 +1805,7 @@ class _DashboardViewState extends State<DashboardView> {
+                                                 IconButton(
+                                                   padding: EdgeInsets.zero,
+                                                   constraints: const BoxConstraints(),
+-                                                  icon: const Icon(Icons.close, color: Colors.redAccent, size: 8),
++                                                  icon: const Icon(Icons.close, color: Colors.redAccent, size: 12),
+                                                   onPressed: () {
+                                                     state.removeAssignment(a.id);
+                                                   },
+@@ -2211,6 +2381,65 @@ class _DashboardViewState extends State<DashboardView> {
+       ),
+     );
+   }
++
++  Widget _buildFloatingNotifications(BuildContext context, TrackerState state) {
++    final list = state.activeNotifications.where((n) => n.title.contains('Security Alert') || n.title.contains('Tampering')).toList();
++    if (list.isEmpty) return const SizedBox.shrink();
++
++    return Column(
++      mainAxisSize: MainAxisSize.min,
++      children: list.map((n) {
++        return Container(
++          margin: const EdgeInsets.only(bottom: 8),
++          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
++          decoration: BoxDecoration(
++            color: const Color(0xFF1E1E26),
++            borderRadius: BorderRadius.circular(12),
++            border: Border.all(color: Colors.redAccent.withOpacity(0.5)),
++            boxShadow: [
++              BoxShadow(
++                color: Colors.black.withOpacity(0.5),
++                blurRadius: 10,
++                spreadRadius: 2,
++              )
++            ],
++          ),
++          child: Row(
++            crossAxisAlignment: CrossAxisAlignment.start,
++            children: [
++              const Icon(Icons.warning, color: Colors.redAccent, size: 20),
++              const SizedBox(width: 12),
++              Expanded(
++                child: Column(
++                  crossAxisAlignment: CrossAxisAlignment.start,
++                  children: [
++                    Text(
++                      n.title,
++                      style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
++                    ),
++                    const SizedBox(height: 4),
++                    Text(
++                      n.message,
++                      style: const TextStyle(color: Colors.grey, fontSize: 11),
++                    ),
++                  ],
++                ),
++              ),
++              const SizedBox(width: 8),
++              IconButton(
++                padding: EdgeInsets.zero,
++                constraints: const BoxConstraints(),
++                icon: const Icon(Icons.close, color: Colors.grey, size: 14),
++                onPressed: () {
++                  state.markNotificationAsRead(n.id);
++                },
++              ),
++            ],
++          ),
++        );
++      }).toList(),
++    );
++  }
+ }
+ 
+ // ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+@@ -2464,10 +2693,11 @@ class _AddSiteDialogState extends State<_AddSiteDialog> {
+   @override
+   Widget build(BuildContext context) {
+     final fenceColor = _hexToColor(_fenceColor);
++    final isMobile = MediaQuery.of(context).size.width < 700;
+ 
+     return Dialog(
+       backgroundColor: Colors.transparent,
+-      insetPadding: const EdgeInsets.all(24),
++      insetPadding: EdgeInsets.all(isMobile ? 12 : 24),
+       child: Container(
+         width: double.infinity,
+         height: MediaQuery.of(context).size.height * 0.9,
+@@ -2487,7 +2717,7 @@ class _AddSiteDialogState extends State<_AddSiteDialog> {
+           children: [
+             // ΓöÇΓöÇ Header ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+             Container(
+-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
++              padding: EdgeInsets.symmetric(horizontal: isMobile ? 16 : 24, vertical: 16),
+               decoration: const BoxDecoration(
+                 color: Color(0xFF1E1E26),
+                 borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+@@ -2502,15 +2732,24 @@ class _AddSiteDialogState extends State<_AddSiteDialog> {
+                     ),
+                     child: Icon(widget.site != null ? Icons.edit_location_alt : Icons.add_location_alt, color: const Color(0xFF00BFA5), size: 22),
+                   ),
+-                  const SizedBox(width: 14),
+-                  Column(
+-                    crossAxisAlignment: CrossAxisAlignment.start,
+-                    children: [
+-                      Text(widget.site != null ? 'Edit Worksite' : 'Add New Worksite', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+-                      Text(widget.site != null ? 'Modify site details and adjust geofence' : 'Fill site details and mark the geofence on the map', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+-                    ],
++                  const SizedBox(width: 10),
++                  Expanded(
++                    child: Column(
++                      crossAxisAlignment: CrossAxisAlignment.start,
++                      children: [
++                        Text(
++                          widget.site != null ? 'Edit Worksite' : 'Add New Worksite',
++                          style: TextStyle(color: Colors.white, fontSize: isMobile ? 15 : 18, fontWeight: FontWeight.bold),
++                          overflow: TextOverflow.ellipsis,
++                        ),
++                        Text(
++                          widget.site != null ? 'Modify site details and adjust geofence' : 'Fill site details and mark the geofence on the map',
++                          style: TextStyle(color: Colors.grey, fontSize: isMobile ? 10 : 12),
++                          overflow: TextOverflow.ellipsis,
++                        ),
++                      ],
++                    ),
+                   ),
+-                  const Spacer(),
+                   IconButton(
+                     onPressed: () => Navigator.pop(context),
+                     icon: const Icon(Icons.close, color: Colors.grey),
+@@ -2519,36 +2758,53 @@ class _AddSiteDialogState extends State<_AddSiteDialog> {
+               ),
+             ),
+ 
+-            // ΓöÇΓöÇ Body: Left form + Right map ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++            // ΓöÇΓöÇ Body: Left form + Right map (Desktop) or Vertical Stack (Mobile) ΓöÇΓöÇ
+             Expanded(
+-              child: Row(
+-                crossAxisAlignment: CrossAxisAlignment.stretch,
+-                children: [
+-                  // ΓöÇΓöÇ LEFT: Site Details Form ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+-                  SizedBox(
+-                    width: 340,
+-                    child: Container(
+-                      decoration: const BoxDecoration(
+-                        border: Border(right: BorderSide(color: Color(0xFF2D2D38))),
+-                      ),
+-                      child: SingleChildScrollView(
+-                        padding: const EdgeInsets.all(20),
+-                        child: _buildFormPanel(),
++              child: isMobile
++                  ? SingleChildScrollView(
++                      child: Column(
++                        crossAxisAlignment: CrossAxisAlignment.stretch,
++                        children: [
++                          Padding(
++                            padding: const EdgeInsets.all(16),
++                            child: _buildFormPanel(),
++                          ),
++                          const Divider(color: Color(0xFF2D2D38), height: 1),
++                          SizedBox(
++                            height: 280,
++                            child: _buildMapPanel(fenceColor),
++                          ),
++                        ],
+                       ),
+-                    ),
+-                  ),
++                    )
++                  : Row(
++                      crossAxisAlignment: CrossAxisAlignment.stretch,
++                      children: [
++                        // ΓöÇΓöÇ LEFT: Site Details Form ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++                        SizedBox(
++                          width: 340,
++                          child: Container(
++                            decoration: const BoxDecoration(
++                              border: Border(right: BorderSide(color: Color(0xFF2D2D38))),
++                            ),
++                            child: SingleChildScrollView(
++                              padding: const EdgeInsets.all(20),
++                              child: _buildFormPanel(),
++                            ),
++                          ),
++                        ),
+ 
+-                  // ΓöÇΓöÇ RIGHT: Interactive Map ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+-                  Expanded(
+-                    child: _buildMapPanel(fenceColor),
+-                  ),
+-                ],
+-              ),
++                        // ΓöÇΓöÇ RIGHT: Interactive Map ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++                        Expanded(
++                          child: _buildMapPanel(fenceColor),
++                        ),
++                      ],
++                    ),
+             ),
+ 
+             // ΓöÇΓöÇ Footer: Actions ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+             Container(
+-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
++              padding: EdgeInsets.symmetric(horizontal: isMobile ? 12 : 24, vertical: 14),
+               decoration: const BoxDecoration(
+                 color: Color(0xFF1E1E26),
+                 borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
+@@ -2559,7 +2815,7 @@ class _AddSiteDialogState extends State<_AddSiteDialog> {
+                   // Geofence summary chip
+                   if (_fenceShape == GeofenceShape.circle && _circleCenter != null)
+                     Container(
+-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
++                      padding: EdgeInsets.symmetric(horizontal: isMobile ? 8 : 10, vertical: 5),
+                       decoration: BoxDecoration(
+                         color: _hexToColor(_fenceColor).withOpacity(0.1),
+                         borderRadius: BorderRadius.circular(8),
+@@ -2569,17 +2825,19 @@ class _AddSiteDialogState extends State<_AddSiteDialog> {
+                         mainAxisSize: MainAxisSize.min,
+                         children: [
+                           Icon(Icons.radio_button_checked, color: _hexToColor(_fenceColor), size: 13),
+-                          const SizedBox(width: 6),
+-                          Text(
+-                            'Circle ΓÇó ${_circleRadius.toInt()}m radius',
+-                            style: TextStyle(color: _hexToColor(_fenceColor), fontSize: 11, fontWeight: FontWeight.bold),
+-                          ),
++                          if (!isMobile) ...[
++                            const SizedBox(width: 6),
++                            Text(
++                              'Circle ΓÇó ${_circleRadius.toInt()}m radius',
++                              style: TextStyle(color: _hexToColor(_fenceColor), fontSize: 11, fontWeight: FontWeight.bold),
++                            ),
++                          ],
+                         ],
+                       ),
+                     )
+                   else if (_fenceShape == GeofenceShape.polygon && _polygonPoints.isNotEmpty)
+                     Container(
+-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
++                      padding: EdgeInsets.symmetric(horizontal: isMobile ? 8 : 10, vertical: 5),
+                       decoration: BoxDecoration(
+                         color: _hexToColor(_fenceColor).withOpacity(0.1),
+                         borderRadius: BorderRadius.circular(8),
+@@ -2589,33 +2847,38 @@ class _AddSiteDialogState extends State<_AddSiteDialog> {
+                         mainAxisSize: MainAxisSize.min,
+                         children: [
+                           Icon(Icons.pentagon_outlined, color: _hexToColor(_fenceColor), size: 13),
+-                          const SizedBox(width: 6),
+-                          Text(
+-                            'Polygon ΓÇó ${_polygonPoints.length} pts',
+-                            style: TextStyle(color: _hexToColor(_fenceColor), fontSize: 11, fontWeight: FontWeight.bold),
+-                          ),
++                          if (!isMobile) ...[
++                            const SizedBox(width: 6),
++                            Text(
++                              'Polygon ΓÇó ${_polygonPoints.length} pts',
++                              style: TextStyle(color: _hexToColor(_fenceColor), fontSize: 11, fontWeight: FontWeight.bold),
++                            ),
++                          ],
+                         ],
+                       ),
+                     )
+                   else
+-                    const Text('ΓÜá∩╕Å  No geofence drawn yet', style: TextStyle(color: Colors.orange, fontSize: 11)),
++                    Text(
++                      isMobile ? 'ΓÜá∩╕Å Empty' : 'ΓÜá∩╕Å  No geofence drawn yet',
++                      style: const TextStyle(color: Colors.orange, fontSize: 11),
++                    ),
+ 
+                   const Spacer(),
+                   TextButton(
+                     onPressed: _isSaving ? null : () => Navigator.pop(context),
+                     child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+                   ),
+-                  const SizedBox(width: 12),
++                  const SizedBox(width: 8),
+                   ElevatedButton.icon(
+                     onPressed: _isSaving ? null : _save,
+                     icon: _isSaving
+                         ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                         : const Icon(Icons.save_alt, size: 16),
+-                    label: Text(_isSaving ? 'Saving...' : 'Save Site & Geofence'),
++                    label: Text(_isSaving ? 'Saving...' : (isMobile ? 'Save' : 'Save Site & Geofence')),
+                     style: ElevatedButton.styleFrom(
+                       backgroundColor: const Color(0xFF00BFA5),
+                       foregroundColor: Colors.black,
+-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
++                      padding: EdgeInsets.symmetric(horizontal: isMobile ? 12 : 20, vertical: 12),
+                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                     ),
+                   ),
+diff --git a/sgs_field_tracker/lib/live_map_view.dart b/sgs_field_tracker/lib/live_map_view.dart
+index b5c3433..369c83a 100644
+--- a/sgs_field_tracker/lib/live_map_view.dart
++++ b/sgs_field_tracker/lib/live_map_view.dart
+@@ -1,3 +1,5 @@
++import 'dart:async';
++import 'dart:convert';
+ import 'dart:math';
+ import 'package:flutter/material.dart';
+ import 'package:flutter_map/flutter_map.dart';
+@@ -29,10 +31,10 @@ String getInitials(String name) {
+   return parts[0][0].toUpperCase();
+ }
+ 
+-// ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++// ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼
+ // LIVE MAP VIEW
+ // Full Wialon-style real-time map panel used in Tab 0 of the dashboard
+-// ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++// ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼
+ 
+ class LiveMapView extends StatefulWidget {
+   const LiveMapView({super.key});
+@@ -52,6 +54,15 @@ class _LiveMapViewState extends State<LiveMapView> {
+   bool _hasCenteredOnPcLocation = false;
+   MapStyle _mapStyle = MapStyle.satellite;
+   double _currentZoom = 12.0; // tracks live zoom for adaptive geofence rendering
++  bool _showSidebar = true;
++  bool _showSidebarInit = false;
++
++  // Search state
++  final TextEditingController _searchCtrl = TextEditingController();
++  String _searchQuery = '';
++  List<Map<String, dynamic>> _placeSuggestions = [];
++  bool _isSearchingPlaces = false;
++  Timer? _debounceTimer;
+ 
+   // Geofence drawing
+   LatLng? _drawingCenter;
+@@ -82,46 +93,70 @@ class _LiveMapViewState extends State<LiveMapView> {
+     _manualLatCtrl.dispose();
+     _manualLngCtrl.dispose();
+     _manualRadiusCtrl.dispose();
++    _searchCtrl.dispose();
++    _debounceTimer?.cancel();
+     super.dispose();
+   }
+ 
+   @override
+   Widget build(BuildContext context) {
+-    final mapSvc = context.watch<MapService>();
+-    final trackerState = context.watch<TrackerState>();
+-
+-    // Center on user PC location once it is loaded
+-    if (trackerState.hasRealLocation && !_hasCenteredOnPcLocation) {
+-      _hasCenteredOnPcLocation = true;
+-      WidgetsBinding.instance.addPostFrameCallback((_) {
+-        _mapController.move(
+-          LatLng(trackerState.currentLat, trackerState.currentLng),
+-          12,
+-        );
+-      });
+-    }
++    final mapSvc = Provider.of<MapService>(context);
++    final trackerState = Provider.of<TrackerState>(context);
++    final isDesktop = MediaQuery.of(context).size.width > 720;
+ 
+-    return Row(
+-      crossAxisAlignment: CrossAxisAlignment.stretch,
+-      children: [
+-        // ΓöÇΓöÇ Left: Map ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+-        Expanded(
+-          flex: 3,
+-          child: _buildMap(mapSvc, trackerState),
+-        ),
++    // Auto-open sidebar on first build (desktop)
++    if (!_showSidebarInit && isDesktop) {
++      _showSidebarInit = true;
++    }
+ 
+-        const SizedBox(width: 16),
++    final mapWidget = _buildMap(mapSvc, trackerState);
++    final sidebarWidget = _buildWorkerSidebar(mapSvc, trackerState);
+ 
+-        // ΓöÇΓöÇ Right: Worker Sidebar ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+-        SizedBox(
+-          width: 260,
+-          child: _buildWorkerSidebar(mapSvc, trackerState),
+-        ),
+-      ],
+-    );
++    if (isDesktop) {
++      return Row(
++        crossAxisAlignment: CrossAxisAlignment.stretch,
++        children: [
++          // ΓöÇΓöÇ Left: Map ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++          Expanded(
++            child: mapWidget,
++          ),
++          if (_showSidebar) ...[
++            const SizedBox(width: 16),
++            // ΓöÇΓöÇ Right: Worker Sidebar ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++            SizedBox(
++              width: 260,
++              child: sidebarWidget,
++            ),
++          ],
++        ],
++      );
++    } else {
++      // Mobile/Tablet: Stack layout so sidebar overlays map
++      return Stack(
++        children: [
++          Positioned.fill(child: mapWidget),
++          if (_showSidebar)
++            Positioned(
++              top: 0,
++              bottom: 0,
++              right: 0,
++              width: 260,
++              child: Material(
++                elevation: 16,
++                color: const Color(0xFF1E1E26),
++                borderRadius: const BorderRadius.only(
++                  topLeft: Radius.circular(16),
++                  bottomLeft: Radius.circular(16),
++                ),
++                child: sidebarWidget,
++              ),
++            ),
++        ],
++      );
++    }
+   }
+ 
+-  // ΓöÇΓöÇ Map Widget ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++  // ├óΓÇ¥Γé¼├óΓÇ¥Γé¼ Map Widget ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼
+ 
+   Widget _buildMap(MapService mapSvc, TrackerState trackerState) {
+     return Container(
+@@ -133,7 +168,7 @@ class _LiveMapViewState extends State<LiveMapView> {
+         borderRadius: BorderRadius.circular(16),
+         child: Stack(
+           children: [
+-            // ΓöÇΓöÇ FlutterMap ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++            // ├óΓÇ¥Γé¼├óΓÇ¥Γé¼ FlutterMap ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼
+             FlutterMap(
+               mapController: _mapController,
+               options: MapOptions(
+@@ -143,12 +178,9 @@ class _LiveMapViewState extends State<LiveMapView> {
+                 onTap: _isDrawingGeofence ? _onMapTap : null,
+                 onMapEvent: (event) {
+                   // Track zoom so geofence rendering adapts (icon vs full shape)
+-                  if (event is MapEventMove || event is MapEventScrollWheelZoom ||
+-                      event is MapEventDoubleTapZoom || event is MapEventFlingAnimation) {
+-                    final newZoom = _mapController.camera.zoom;
+-                    if ((newZoom - _currentZoom).abs() > 0.1) {
+-                      setState(() => _currentZoom = newZoom);
+-                    }
++                  final newZoom = _mapController.camera.zoom;
++                  if ((newZoom - _currentZoom).abs() > 0.1) {
++                    setState(() => _currentZoom = newZoom);
+                   }
+                 },
+               ),
+@@ -177,12 +209,12 @@ class _LiveMapViewState extends State<LiveMapView> {
+                     tileSize: 256,
+                   )
+                 else if (_mapStyle == MapStyle.satellite)
+-                  // Google Satellite: globally available, CORS-friendly, crisp up to zoom 21
++                  // Esri World Imagery
+                   TileLayer(
+                     urlTemplate:
+-                        'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
++                        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                     userAgentPackageName: 'com.sgs.field_tracker',
+-                    maxNativeZoom: 21,
++                    maxNativeZoom: 19,
+                     maxZoom: 22,
+                     keepBuffer: 4,
+                     tileSize: 256,
+@@ -201,24 +233,12 @@ class _LiveMapViewState extends State<LiveMapView> {
+                 // 5. Live worker pins
+                 _buildWorkerMarkerLayer(mapSvc, trackerState),
+               ],
+-            ),
+-
+-            // ΓöÇΓöÇ Top bar: Map controls ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+-            Positioned(
+-              top: 12,
+-              left: 12,
+-              right: 12,
+-              child: _buildMapControls(mapSvc, trackerState),
+-            ),
+-
+-            // ΓöÇΓöÇ Bottom bar: Connection status ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+-            Positioned(
+               bottom: 12,
+               left: 12,
+               child: _buildConnectionBadge(mapSvc),
+             ),
+ 
+-            // ΓöÇΓöÇ Drawing instructions overlay ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++            // ├óΓÇ¥Γé¼├óΓÇ¥Γé¼ Drawing instructions overlay ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼
+             if (_isDrawingGeofence)
+               Positioned(
+                 bottom: 12,
+@@ -231,9 +251,9 @@ class _LiveMapViewState extends State<LiveMapView> {
+     );
+   }
+ 
+-  // ΓöÇΓöÇ Geofence Layer ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+-  // Zoom < 12  ΓåÆ compact icon pin per geofence (doesn't clutter zoomed-out view)
+-  // Zoom >= 12 ΓåÆ full circle / polygon shape as normal
++  // ├óΓÇ¥Γé¼├óΓÇ¥Γé¼ Geofence Layer ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼
++  // Zoom < 12  ├óΓÇáΓÇÖ compact icon pin per geofence (doesn't clutter zoomed-out view)
++  // Zoom >= 12 ├óΓÇáΓÇÖ full circle / polygon shape as normal
+ 
+   static const double _geofenceIconZoomThreshold = 12.0;
+ 
+@@ -243,41 +263,6 @@ class _LiveMapViewState extends State<LiveMapView> {
+ 
+     // 1. Build shapes (only when zoomed in enough)
+     final circles = <CircleMarker>[];
+-    final polygons = <Polygon>[];
+-
+-    if (_currentZoom >= _geofenceIconZoomThreshold) {
+-      for (final g in geofences) {
+-        final color = hexToColor(g.color);
+-        if (g.type == GeofenceShape.circle && g.center != null && g.radiusM != null) {
+-          circles.add(CircleMarker(
+-            point: g.center!,
+-            radius: g.radiusM!,
+-            useRadiusInMeter: true,
+-            color: color.withOpacity(0.08),
+-            borderColor: color.withOpacity(0.7),
+-            borderStrokeWidth: 2,
+-          ));
+-        } else if (g.type == GeofenceShape.polygon && g.polygon != null) {
+-          polygons.add(Polygon(
+-            points: g.polygon!,
+-            color: color.withOpacity(0.08),
+-            borderColor: color.withOpacity(0.7),
+-            borderStrokeWidth: 2,
+-          ));
+-        }
+-      }
+-    }
+-
+-    // 2. Build icon pin markers (always visible!)
+-    final markers = geofences.map((g) {
+-      // Determine center point
+-      LatLng? center;
+-      if (g.type == GeofenceShape.circle && g.center != null) {
+-        center = g.center;
+-      } else if (g.type == GeofenceShape.polygon && g.polygon != null && g.polygon!.isNotEmpty) {
+-        // Compute centroid of polygon
+-        final pts = g.polygon!;
+-        center = LatLng(
+           pts.map((p) => p.latitude).reduce((a, b) => a + b) / pts.length,
+           pts.map((p) => p.longitude).reduce((a, b) => a + b) / pts.length,
+         );
+@@ -286,7 +271,7 @@ class _LiveMapViewState extends State<LiveMapView> {
+ 
+       final color = hexToColor(g.color);
+       final isCircle = g.type == GeofenceShape.circle;
+-      final shortName = g.name.length > 14 ? '${g.name.substring(0, 12)}ΓÇª' : g.name;
++      final shortName = g.name.length > 14 ? '${g.name.substring(0, 12)}├óΓé¼┬ª' : g.name;
+ 
+       return Marker(
+         point: center,
+@@ -349,7 +334,7 @@ class _LiveMapViewState extends State<LiveMapView> {
+     ]);
+   }
+ 
+-  // ΓöÇΓöÇ Drawing Preview Layer ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++  // ├óΓÇ¥Γé¼├óΓÇ¥Γé¼ Drawing Preview Layer ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼
+ 
+   Widget _buildDrawingPreviewLayer() {
+     if (_drawingType == GeofenceShape.circle) {
+@@ -423,7 +408,7 @@ class _LiveMapViewState extends State<LiveMapView> {
+     }
+   }
+ 
+-  // ΓöÇΓöÇ Trail Layer ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++  // ├óΓÇ¥Γé¼├óΓÇ¥Γé¼ Trail Layer ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼
+ 
+   Widget _buildTrailLayer(MapService mapSvc, TrackerState trackerState) {
+     final polylines = <Polyline>[];
+@@ -445,8 +430,43 @@ class _LiveMapViewState extends State<LiveMapView> {
+     return PolylineLayer(polylines: polylines);
+   }
+ 
+-  // ΓöÇΓöÇ Worker Marker Layer ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++  // ├óΓÇ¥Γé¼├óΓÇ¥Γé¼ Worker Marker Layer ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼
++
++  Widget _buildWorkerMarkerLayer(MapService mapSvc, TrackerState trackerState) {
++    final markers = <Marker>[];
++
++    // First add markers from live MapService locations
++    for (final entry in mapSvc.workerLocations.entries) {
++      final loc = entry.value;
++      final isSelected = _selectedWorkerId == loc.workerId;
++      markers.add(Marker(
++        point: LatLng(loc.lat, loc.lng),
++        width: isSelected ? 90 : 70,
++        height: isSelected ? 90 : 70,
++        child: GestureDetector(
++          onTap: () => _onWorkerPinTap(loc, trackerState),
++          child: _buildWorkerPin(loc, isSelected, trackerState),
++        ),
++      ));
++    }
+ 
++    // Fallback: show static pins for workers with no live location
++    for (final worker in trackerState.workers) {
++      if (!mapSvc.workerLocations.containsKey(worker.id)) {
++        final hb = trackerState.heartbeatLogs
++            .lastWhere((h) => h.workerId == worker.id,
++                orElse: () => HeartbeatLog(
++                      id: '',
++                      workerId: worker.id,
++                      timestamp: DateTime.now(),
++                      latitude: 25.2048 + (trackerState.workers.indexOf(worker) * 0.005),
++                      longitude: 55.2708,
++                    ));
++        markers.add(Marker(
++          point: LatLng(hb.latitude, hb.longitude),
++          width: 60,
++          height: 60,
++          child: GestureDetector(
+   Widget _buildWorkerMarkerLayer(MapService mapSvc, TrackerState trackerState) {
+     final markers = <Marker>[];
+ 
+@@ -498,41 +518,6 @@ class _LiveMapViewState extends State<LiveMapView> {
+         child: Tooltip(
+           message: 'My PC Location',
+           child: Container(
+-            decoration: BoxDecoration(
+-              shape: BoxShape.circle,
+-              color: Colors.blueAccent.withOpacity(0.2),
+-            ),
+-            padding: const EdgeInsets.all(6),
+-            child: Container(
+-              decoration: BoxDecoration(
+-                shape: BoxShape.circle,
+-                color: Colors.blueAccent,
+-                border: Border.all(color: Colors.white, width: 2),
+-                boxShadow: [
+-                  BoxShadow(
+-                    color: Colors.blueAccent.withOpacity(0.5),
+-                    blurRadius: 6,
+-                    spreadRadius: 2,
+-                  )
+-                ],
+-              ),
+-            ),
+-          ),
+-        ),
+-      ));
+-    }
+-
+-    return MarkerLayer(markers: markers);
+-  }
+-
+-  Widget _buildWorkerPin(WorkerLocation loc, bool isSelected, TrackerState trackerState) {
+-    final isOnline = loc.isOnline && loc.isRecent;
+-    final color = isOnline
+-        ? (loc.isOnShift ? const Color(0xFF00BFA5) : const Color(0xFFFFD600))
+-        : const Color(0xFFF44336);
+-
+-    final initials = getInitials(loc.workerName);
+-    
+     // Look up worker to get Employee ID and Phone
+     final worker = trackerState.workers.firstWhere(
+       (w) => w.id == loc.workerId,
+@@ -701,7 +686,7 @@ class _LiveMapViewState extends State<LiveMapView> {
+     );
+   }
+ 
+-  // ΓöÇΓöÇ Map Controls ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++  // ├óΓÇ¥Γé¼├óΓÇ¥Γé¼ Map Controls ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼
+ 
+   Widget _buildMapControls(MapService mapSvc, TrackerState trackerState) {
+     return Row(
+@@ -716,6 +701,7 @@ class _LiveMapViewState extends State<LiveMapView> {
+           child: const Row(
+             mainAxisSize: MainAxisSize.min,
+             children: [
++              Icon(Icons.satellite_alt, color: Color(0xFF00BFA5), size: 13),
+               Icon(Icons.satellite_alt, color: Color(0xFF00BFA5), size: 13),
+               SizedBox(width: 5),
+               Text('Live Field Map', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+@@ -736,6 +722,48 @@ class _LiveMapViewState extends State<LiveMapView> {
+                   label: 'Fences',
+                   active: _showGeofences,
+                   onTap: () => setState(() => _showGeofences = !_showGeofences),
++  // ├óΓÇ¥Γé¼├óΓÇ¥Γé¼ Map Controls ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼
++  Widget _buildMapControls(MapService mapSvc, TrackerState trackerState) {
++    return Row(
++      children: [
++        // Title badge
++        Container(
++          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
++          decoration: BoxDecoration(
++            color: Colors.black.withOpacity(0.8),
++            borderRadius: BorderRadius.circular(8),
++          ),
++          child: const Row(
++            mainAxisSize: MainAxisSize.min,
++            children: [
++              Icon(Icons.satellite_alt, color: Color(0xFF00BFA5), size: 13),
++              SizedBox(width: 5),
++              Text('Live Field Map', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
++            ],
++          ),
++        ),
++        const SizedBox(width: 6),
++        // All right-side controls in a flexible scrollable row to prevent overflow
++        Flexible(
++          child: SingleChildScrollView(
++            scrollDirection: Axis.horizontal,
++            child: Row(
++              mainAxisSize: MainAxisSize.min,
++              children: [
++                // Toggle: Geofences
++                 _mapToggleBtn(
++                  icon: Icons.people,
++                  label: 'Workers',
++                  active: _showSidebar,
++                  onTap: () => setState(() => _showSidebar = !_showSidebar),
++                ),
++                const SizedBox(width: 5),
++                // Toggle: Fences
++                _mapToggleBtn(
++                  icon: Icons.radio_button_unchecked,
++                  label: 'Fences',
++                  active: _showGeofences,
++                  onTap: () => setState(() => _showGeofences = !_showGeofences),
+                 ),
+                 const SizedBox(width: 5),
+                 // Toggle: Trails
+@@ -751,7 +779,7 @@ class _LiveMapViewState extends State<LiveMapView> {
+                 _mapIconBtn(
+                   icon: Icons.fit_screen,
+                   tooltip: 'Fit all workers',
+-                  onTap: () => _fitAllWorkers(mapSvc),
++                  onTap: () => _fitAllWorkers(mapSvc, trackerState),
+                 ),
+                 const SizedBox(width: 5),
+                 // Center on my location
+@@ -785,48 +813,6 @@ class _LiveMapViewState extends State<LiveMapView> {
+                 ),
+               ],
+             ),
+-          ),
+-        ),
+-      ],
+-    );
+-  }
+-
+-  Widget _styleSegmentBtn(MapStyle style, IconData icon, String label) {
+-    final active = _mapStyle == style;
+-    return GestureDetector(
+-      onTap: () => setState(() => _mapStyle = style),
+-      child: AnimatedContainer(
+-        duration: const Duration(milliseconds: 200),
+-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+-        decoration: BoxDecoration(
+-          color: active ? const Color(0xFF00BFA5).withOpacity(0.15) : Colors.transparent,
+-          borderRadius: BorderRadius.circular(6),
+-        ),
+-        child: Row(
+-          mainAxisSize: MainAxisSize.min,
+-          children: [
+-            Icon(
+-              icon,
+-              color: active ? const Color(0xFF00BFA5) : Colors.grey,
+-              size: 11,
+-            ),
+-            const SizedBox(width: 4),
+-            Text(
+-              label,
+-              style: TextStyle(
+-                color: active ? const Color(0xFF00BFA5) : Colors.grey,
+-                fontSize: 9,
+-                fontWeight: FontWeight.bold,
+-              ),
+-            ),
+-          ],
+-        ),
+-      ),
+-    );
+-  }
+-
+-  Widget _mapToggleBtn({
+-    required IconData icon,
+     required String label,
+     required bool active,
+     Color activeColor = const Color(0xFF00BFA5),
+@@ -847,7 +833,6 @@ class _LiveMapViewState extends State<LiveMapView> {
+           Text(label,
+               style: TextStyle(
+                   color: active ? activeColor : Colors.grey,
+-                  fontSize: 11,
+                   fontWeight: FontWeight.bold)),
+         ]),
+       ),
+@@ -900,10 +885,11 @@ class _LiveMapViewState extends State<LiveMapView> {
+     );
+   }
+ 
+-  // ΓöÇΓöÇ Geofence Drawing Panel ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++  // ├óΓÇ¥Γé¼├óΓÇ¥Γé¼ Geofence Drawing Panel ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼
+ 
+   Widget _buildDrawingPanel(MapService mapSvc) {
+     return Container(
++      width: 240,
+       width: 240,
+       padding: const EdgeInsets.all(14),
+       decoration: BoxDecoration(
+@@ -941,8 +927,7 @@ class _LiveMapViewState extends State<LiveMapView> {
+             const SizedBox(height: 10),
+ 
+             // Geofence Name
+-            TextField(
+-              controller: _geofenceNameCtrl,
++         
+               style: const TextStyle(color: Colors.white, fontSize: 12),
+               decoration: const InputDecoration(
+                 labelText: 'Geofence Name',
+@@ -1023,8 +1008,8 @@ class _LiveMapViewState extends State<LiveMapView> {
+               if (_drawingType == GeofenceShape.circle) ...[
+                 Text(
+                   _drawingCenter == null
+-                      ? '≡ƒôì Tap the map to set the center point.'
+-                      : 'Γ£à Center: ${_drawingCenter!.latitude.toStringAsFixed(4)}, ${_drawingCenter!.longitude.toStringAsFixed(4)}',
++                      ? '├░┼╕ΓÇ£┬ì Tap the map to set the center point.'
++                      : '├ó┼ôΓÇª Center: ${_drawingCenter!.latitude.toStringAsFixed(4)}, ${_drawingCenter!.longitude.toStringAsFixed(4)}',
+                   style: const TextStyle(color: Colors.white70, fontSize: 10),
+                 ),
+                 const SizedBox(height: 10),
+@@ -1039,7 +1024,7 @@ class _LiveMapViewState extends State<LiveMapView> {
+                 ),
+               ] else ...[
+                 Text(
+-                  '≡ƒôì Tap map vertices to draw polygon (${_drawingPolygonPoints.length} added)',
++                  '├░┼╕ΓÇ£┬ì Tap map vertices to draw polygon (${_drawingPolygonPoints.length} added)',
+                   style: const TextStyle(color: Colors.white70, fontSize: 10),
+                 ),
+                 const SizedBox(height: 8),
+@@ -1177,12 +1162,13 @@ class _LiveMapViewState extends State<LiveMapView> {
+           filled: true,
+           fillColor: const Color(0xFF13131A),
+           border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide.none),
++          border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide.none),
+         ),
+       ),
+     );
+   }
+ 
+-  // ΓöÇΓöÇ Worker Sidebar ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++  // ├óΓÇ¥Γé¼├óΓÇ¥Γé¼ Worker Sidebar ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼
+ 
+   Widget _buildWorkerSidebar(MapService mapSvc, TrackerState trackerState) {
+     return Container(
+@@ -1232,7 +1218,6 @@ class _LiveMapViewState extends State<LiveMapView> {
+                 final isSelected = _selectedWorkerId == worker.id;
+ 
+                 return GestureDetector(
+-                  onTap: () => _focusWorker(worker.id, liveLoc),
+                   child: AnimatedContainer(
+                     duration: const Duration(milliseconds: 200),
+                     margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+@@ -1363,7 +1348,7 @@ class _LiveMapViewState extends State<LiveMapView> {
+     );
+   }
+ 
+-  // ΓöÇΓöÇ Interactions ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++  // ├óΓÇ¥Γé¼├óΓÇ¥Γé¼ Interactions ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼
+ 
+   void _onMapTap(TapPosition tapPos, LatLng latlng) {
+     if (_drawingType == GeofenceShape.circle) {
+@@ -1542,27 +1527,6 @@ class _LiveMapViewState extends State<LiveMapView> {
+         title: Row(
+           children: [
+             const Icon(Icons.person, color: Color(0xFF00BFA5), size: 20),
+-            const SizedBox(width: 8),
+-            Text(loc.workerName, style: const TextStyle(color: Colors.white, fontSize: 15)),
+-          ],
+-        ),
+-        content: Column(
+-          mainAxisSize: MainAxisSize.min,
+-          crossAxisAlignment: CrossAxisAlignment.start,
+-          children: [
+-            _popupRow(Icons.badge, 'Employee ID', worker.employeeId),
+-            _popupRow(Icons.work, 'Designation', worker.designation),
+-            _popupRow(Icons.business, 'Department', worker.department),
+-            _popupRow(Icons.location_on, 'Coordinates',
+-                '${loc.lat.toStringAsFixed(5)}, ${loc.lng.toStringAsFixed(5)}'),
+-            _popupRow(Icons.gps_fixed, 'Accuracy', '┬▒${loc.accuracy.toStringAsFixed(1)} m'),
+-            _popupRow(Icons.access_time, 'Last Update',
+-                DateFormat('hh:mm:ss a').format(loc.timestamp.toLocal())),
+-            _popupRow(
+-              loc.isOnShift ? Icons.check_circle : Icons.circle_outlined,
+-              'Shift Status',
+-              loc.isOnShift ? 'On Shift' : 'Off Shift',
+-            ),
+             _popupRow(
+               loc.isOnline ? Icons.wifi : Icons.wifi_off,
+               'Connection',
+@@ -1653,6 +1617,85 @@ class _LiveMapViewState extends State<LiveMapView> {
+                           border: color == c ? Border.all(color: Colors.white, width: 2) : null,
+                         ),
+                       ),
++                    ),
++                ],
++              ),
++            ],
++          ),
++          actions: [
++            TextButton(
++              onPressed: () => Navigator.pop(ctx),
++                  for (final c in ['#00BFA5', '#FF6D00', '#7C4DFF', '#FF4081', '#00B0FF'])
++                    GestureDetector(
++                      onTap: () => setS(() => color = c),
++                      child: Container(
++                        width: 20,
++                        height: 20,
++                        margin: const EdgeInsets.only(left: 6),
++                        decoration: BoxDecoration(
++                          shape: BoxShape.circle,
++                          color: hexToColor(c),
++                          border: color == c ? Border.all(color: Colors.white, width: 2) : null,
++                        ),
++                      ),
++                    ),
++                ],
++              ),
++            ],
++          ),
++          actions: [
++            TextButton(
++              onPressed: () => Navigator.pop(ctx),
++              child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
++            ),
++            ElevatedButton(
++              style: ElevatedButton.styleFrom(
++                  backgroundColor: const Color(0xFF00BFA5), foregroundColor: Colors.black),
++              onPressed: () async {
++                final updated = g.copyWith(
++                  name: nameCtrl.text.trim(),
++                  radiusM: radius,
++                  color: color,
++                );
++                await mapSvc.updateGeofence(updated);
++                if (ctx.mounted) Navigator.pop(ctx);
++              },
++              child: const Text('Save Changes'),
++            ),
++          ],
++        ),
++      ),
++    );
++  }
++}
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
+                     ),
+                 ],
+               ),
+@@ -1683,3 +1726,303 @@ class _LiveMapViewState extends State<LiveMapView> {
+     );
+   }
+ }
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++    );
++    return LatLng(hb.latitude, hb.longitude);
++  }
++
++  void _onSearchChanged(String query) {
++    _debounceTimer?.cancel();
++    if (query.trim().length < 3) {
++      setState(() {
++        _placeSuggestions.clear();
++      });
++      return;
++    }
++    _debounceTimer = Timer(const Duration(milliseconds: 600), () {
++      _searchPlaces(query.trim());
++    });
++  }
++
++  Future<void> _searchPlaces(String query) async {
++    if (!mounted) return;
++    setState(() => _isSearchingPlaces = true);
++    try {
++      final url = Uri.parse('https://nominatim.openstreetmap.org/search?q=${Uri.encodeComponent(query)}&format=json&limit=5');
++      final response = await http.get(url, headers: {'User-Agent': 'com.sgs.field_tracker'});
++      if (response.statusCode == 200) {
++        final List data = jsonDecode(response.body);
++        if (mounted) {
++          setState(() {
++            _placeSuggestions = data.map((item) => {
++              'display_name': item['display_name'] as String,
++              'lat': double.parse(item['lat'] as String),
++              'lon': double.parse(item['lon'] as String),
++            }).toList();
++          });
++        }
++      }
++    } catch (e) {
++      debugPrint('Nominatim geocoding error: $e');
++    } finally {
++      if (mounted) {
++        setState(() => _isSearchingPlaces = false);
++      }
++    }
++  }
++
++  Widget _buildSearchBar(BuildContext context, MapService mapSvc, TrackerState trackerState) {
++    return Column(
++      mainAxisSize: MainAxisSize.min,
++      crossAxisAlignment: CrossAxisAlignment.start,
++      children: [
++        Container(
++          width: 340,
++          decoration: BoxDecoration(
++            color: const Color(0xFF1E1E26).withOpacity(0.95),
++            borderRadius: BorderRadius.circular(8),
++            border: Border.all(color: const Color(0xFF2D2D38)),
++            boxShadow: [
++              BoxShadow(
++                color: Colors.black.withOpacity(0.4),
++                blurRadius: 8,
++                offset: const Offset(0, 2),
++              ),
++            ],
++          ),
++          child: TextField(
++            controller: _searchCtrl,
++            style: const TextStyle(color: Colors.white, fontSize: 13),
++            decoration: InputDecoration(
++              hintText: 'Search site, worker, or location...',
++              hintStyle: const TextStyle(color: Colors.grey, fontSize: 12),
++              prefixIcon: const Icon(Icons.search, color: Colors.tealAccent, size: 18),
++              suffixIcon: _searchQuery.isNotEmpty
++                  ? IconButton(
++                      icon: const Icon(Icons.clear, color: Colors.grey, size: 16),
++                      onPressed: () {
++                        setState(() {
++                          _searchCtrl.clear();
++                          _searchQuery = '';
++                          _placeSuggestions.clear();
++                        });
++                      },
++                    )
++                  : null,
++              border: InputBorder.none,
++              contentPadding: const EdgeInsets.symmetric(vertical: 12),
++            ),
++            onChanged: (val) {
++              setState(() {
++                _searchQuery = val;
++              });
++              _onSearchChanged(val);
++            },
++          ),
++        ),
++        if (_searchQuery.isNotEmpty) ...[
++          const SizedBox(height: 4),
++          Container(
++            width: 340,
++            constraints: const BoxConstraints(maxHeight: 250),
++            decoration: BoxDecoration(
++              color: const Color(0xFF1E1E26).withOpacity(0.95),
++              borderRadius: BorderRadius.circular(8),
++              border: Border.all(color: const Color(0xFF2D2D38)),
++              boxShadow: [
++                BoxShadow(
++                  color: Colors.black.withOpacity(0.4),
++                  blurRadius: 8,
++                ),
++              ],
++            ),
++            child: ClipRRect(
++              borderRadius: BorderRadius.circular(8),
++              child: SingleChildScrollView(
++                child: Column(
++                  mainAxisSize: MainAxisSize.min,
++                  children: [
++                    _buildSiteSuggestions(mapSvc),
++                    _buildWorkerSuggestions(trackerState, mapSvc),
++                    _buildPlaceSuggestions(),
++                  ],
++                ),
++              ),
++            ),
++          ),
++        ],
++      ],
++    );
++  }
++
++  Widget _buildSiteSuggestions(MapService mapSvc) {
++    final query = _searchQuery.toLowerCase();
++    final matchingFences = mapSvc.geofences.where((g) =>
++        g.name.toLowerCase().contains(query) ||
++        g.code.toLowerCase().contains(query)).toList();
++
++    if (matchingFences.isEmpty) return const SizedBox.shrink();
++
++    return Column(
++      crossAxisAlignment: CrossAxisAlignment.start,
++      mainAxisSize: MainAxisSize.min,
++      children: [
++        Container(
++          width: double.infinity,
++          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
++          color: const Color(0xFF13131A),
++          child: const Text('ASSIGNED SITES', style: TextStyle(color: Colors.tealAccent, fontSize: 9, fontWeight: FontWeight.bold)),
++        ),
++        ...matchingFences.map((g) {
++          LatLng? dest;
++          if (g.type == GeofenceShape.circle && g.center != null) {
++            dest = g.center;
++          } else if (g.type == GeofenceShape.polygon && g.polygon != null && g.polygon!.isNotEmpty) {
++            dest = g.polygon!.first;
++          }
++          return ListTile(
++            dense: true,
++            visualDensity: VisualDensity.compact,
++            title: Text(g.name, style: const TextStyle(color: Colors.white, fontSize: 12)),
++            subtitle: Text('Code: ${g.code} ├óΓé¼┬ó ${g.type.name}', style: const TextStyle(color: Colors.grey, fontSize: 10)),
++            leading: const Icon(Icons.location_on, color: Colors.tealAccent, size: 16),
++            onTap: () {
++              if (dest != null) {
++                _mapController.move(dest, 15);
++              }
++              setState(() {
++                _searchCtrl.clear();
++                _searchQuery = '';
++                _placeSuggestions.clear();
++              });
++            },
++          );
++        }),
++      ],
++    );
++  }
++
++  Widget _buildWorkerSuggestions(TrackerState trackerState, MapService mapSvc) {
++    final query = _searchQuery.toLowerCase();
++    final matchingWorkers = trackerState.workers.where((w) =>
++        w.name.toLowerCase().contains(query) ||
++        w.employeeId.toLowerCase().contains(query)).toList();
++
++    if (matchingWorkers.isEmpty) return const SizedBox.shrink();
++
++    return Column(
++      crossAxisAlignment: CrossAxisAlignment.start,
++      mainAxisSize: MainAxisSize.min,
++      children: [
++        Container(
++          width: double.infinity,
++          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
++          color: const Color(0xFF13131A),
++          child: const Text('WORKERS', style: TextStyle(color: Colors.orangeAccent, fontSize: 9, fontWeight: FontWeight.bold)),
++        ),
++        ...matchingWorkers.map((w) {
++          return ListTile(
++            dense: true,
++            visualDensity: VisualDensity.compact,
++            title: Text(w.name, style: const TextStyle(color: Colors.white, fontSize: 12)),
++            subtitle: Text('ID: ${w.employeeId} ├óΓé¼┬ó ${w.designation}', style: const TextStyle(color: Colors.grey, fontSize: 10)),
++            leading: const Icon(Icons.person, color: Colors.orangeAccent, size: 16),
++            onTap: () {
++              final pos = _getWorkerPosition(w, mapSvc, trackerState);
++              _mapController.move(pos, 15);
++              setState(() {
++                _selectedWorkerId = w.id;
++                _searchCtrl.clear();
++                _searchQuery = '';
++                _placeSuggestions.clear();
++              });
++            },
++          );
++        }),
++      ],
++    );
++  }
++
++  Widget _buildPlaceSuggestions() {
++    if (_isSearchingPlaces) {
++      return const Padding(
++        padding: EdgeInsets.all(8.0),
++        child: Center(
++          child: SizedBox(
++            width: 16,
++            height: 16,
++            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.tealAccent),
++          ),
++        ),
++      );
++    }
++
++    if (_placeSuggestions.isEmpty) return const SizedBox.shrink();
++
++    return Column(
++      crossAxisAlignment: CrossAxisAlignment.start,
++      mainAxisSize: MainAxisSize.min,
++      children: [
++        Container(
++          width: double.infinity,
++          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
++          color: const Color(0xFF13131A),
++          child: const Text('GLOBAL LOCATIONS', style: TextStyle(color: Colors.blueAccent, fontSize: 9, fontWeight: FontWeight.bold)),
++        ),
++        ..._placeSuggestions.map((p) {
++          final String name = p['display_name'] as String;
++          final double lat = p['lat'] as double;
++          final double lon = p['lon'] as double;
++          return ListTile(
++            dense: true,
++            visualDensity: VisualDensity.compact,
++            title: Text(name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 11)),
++            leading: const Icon(Icons.public, color: Colors.blueAccent, size: 16),
++            onTap: () {
++              _mapController.move(LatLng(lat, lon), 14);
++              setState(() {
++                _searchCtrl.clear();
++                _searchQuery = '';
++                _placeSuggestions.clear();
++              });
++            },
++          );
++        }),
++      ],
++    );
++  }
++}
+diff --git a/sgs_field_tracker/lib/login_view.dart b/sgs_field_tracker/lib/login_view.dart
+index 910bf2d..9c8534d 100644
+--- a/sgs_field_tracker/lib/login_view.dart
++++ b/sgs_field_tracker/lib/login_view.dart
+@@ -28,12 +28,15 @@ class _LoginViewState extends State<LoginView> {
+   Widget build(BuildContext context) {
+     final state = Provider.of<TrackerState>(context, listen: false);
+ 
++    final screenWidth = MediaQuery.of(context).size.width;
++
+     return Scaffold(
+       backgroundColor: const Color(0xFF0C0C12),
+       body: Center(
+         child: SingleChildScrollView(
++          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+           child: Container(
+-            width: 420,
++            width: screenWidth > 460 ? 420 : screenWidth * 0.9,
+             padding: const EdgeInsets.all(40),
+             decoration: BoxDecoration(
+               color: const Color(0xFF1E1E26),
+diff --git a/sgs_field_tracker/lib/main.dart b/sgs_field_tracker/lib/main.dart
+index 5f6647c..1b81a47 100644
+--- a/sgs_field_tracker/lib/main.dart
++++ b/sgs_field_tracker/lib/main.dart
+@@ -1,4 +1,4 @@
+-import 'package:flutter/material.dart';
++∩╗┐import 'package:flutter/material.dart';
+ import 'package:provider/provider.dart';
+ import 'package:google_fonts/google_fonts.dart';
+ import 'tracker_state.dart';
+@@ -159,12 +159,15 @@ class _MainNavigationControllerState extends State<MainNavigationController> {
+           children: [
+             const WorkerView(),
+             Positioned(
+-              top: 48,
+-              left: 16,
++              top: 42,
++              right: 16,
+               child: CircleAvatar(
++                radius: 18,
+                 backgroundColor: Colors.black.withOpacity(0.6),
+                 child: IconButton(
+-                  icon: const Icon(Icons.logout, color: Colors.tealAccent, size: 18),
++                  icon: const Icon(Icons.logout, color: Colors.tealAccent, size: 16),
++                  padding: EdgeInsets.zero,
++                  constraints: const BoxConstraints(),
+                   onPressed: () {
+                     setState(() {
+                       _isLoggedIn = false;
+@@ -179,35 +182,42 @@ class _MainNavigationControllerState extends State<MainNavigationController> {
+     } else {
+       // Supervisor, Engineer, Admin Dashboard Fullscreen
+       return Scaffold(
+-        body: Column(
+-          children: [
+-            // Header showing role, logout button
+-            Container(
+-              height: 50,
+-              color: const Color(0xFF13131A),
+-              padding: const EdgeInsets.symmetric(horizontal: 16),
+-              child: Row(
+-                mainAxisAlignment: MainAxisAlignment.end,
+-                children: [
+-                  Text(
+-                    'Logged In: ${state.activeRoleId}',
+-                    style: const TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold),
+-                  ),
+-                  const SizedBox(width: 16),
+-                  TextButton.icon(
+-                    onPressed: () {
+-                      setState(() {
+-                        _isLoggedIn = false;
+-                      });
+-                    },
+-                    icon: const Icon(Icons.logout, size: 14, color: Colors.tealAccent),
+-                    label: const Text('LOGOUT', style: TextStyle(color: Colors.white, fontSize: 11)),
+-                  ),
+-                ],
++        body: SafeArea(
++          bottom: false,
++          child: Column(
++            children: [
++              // Header showing role, logout button
++              Container(
++                height: 38, // Sleek, decreased height
++                color: const Color(0xFF13131A),
++                padding: const EdgeInsets.symmetric(horizontal: 16),
++                child: Row(
++                  mainAxisAlignment: MainAxisAlignment.end,
++                  children: [
++                    Text(
++                      'Logged In: ${state.activeRoleId}',
++                      style: const TextStyle(color: Colors.grey, fontSize: 11, fontWeight: FontWeight.bold),
++                    ),
++                    const SizedBox(width: 12),
++                    TextButton.icon(
++                      onPressed: () {
++                        setState(() {
++                          _isLoggedIn = false;
++                        });
++                      },
++                      style: TextButton.styleFrom(
++                        padding: EdgeInsets.zero,
++                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
++                      ),
++                      icon: const Icon(Icons.logout, size: 12, color: Colors.tealAccent),
++                      label: const Text('LOGOUT', style: TextStyle(color: Colors.white, fontSize: 10)),
++                    ),
++                  ],
++                ),
+               ),
+-            ),
+-            const Expanded(child: DashboardView()),
+-          ],
++              const Expanded(child: DashboardView()),
++            ],
++          ),
+         ),
+       );
+     }
+diff --git a/sgs_field_tracker/lib/map_service.dart b/sgs_field_tracker/lib/map_service.dart
+index dba8d09..0c0d6f1 100644
+--- a/sgs_field_tracker/lib/map_service.dart
++++ b/sgs_field_tracker/lib/map_service.dart
+@@ -10,8 +10,18 @@ import 'worker_location.dart';
+ /// The backend server base URL.
+ /// Change this to your PC's local IP when testing with real devices on the same WiFi.
+ /// Example: 'http://192.168.1.105:8080'
+-const String kServerBaseUrl = 'http://localhost:8080';
+-const String kWsBaseUrl = 'ws://localhost:8080';
++String get backendHost {
++  if (kIsWeb) {
++    return 'localhost:8080';
++  }
++  if (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS) {
++    return '192.168.0.127:8080';
++  }
++  return 'localhost:8080';
++}
++
++final String kServerBaseUrl = 'http://$backendHost';
++final String kWsBaseUrl = 'ws://$backendHost';
+ 
+ /// MapService connects the admin dashboard to the Go backend.
+ /// It manages the admin WebSocket connection, worker locations, geofences,
+diff --git a/sgs_field_tracker/lib/models.dart b/sgs_field_tracker/lib/models.dart
+index b57e488..7e24c5b 100644
+--- a/sgs_field_tracker/lib/models.dart
++++ b/sgs_field_tracker/lib/models.dart
+@@ -243,6 +243,24 @@ class ChecklistItem {
+       isCompleted: isCompleted,
+     );
+   }
++
++  Map<String, dynamic> toJson() {
++    return {
++      'id': id,
++      'task': task,
++      'category': category,
++      'isCompleted': isCompleted,
++    };
++  }
++
++  factory ChecklistItem.fromJson(Map<String, dynamic> json) {
++    return ChecklistItem(
++      id: json['id'] as String,
++      task: json['task'] as String,
++      category: json['category'] as String,
++      isCompleted: json['isCompleted'] as bool? ?? false,
++    );
++  }
+ }
+ 
+ class Assignment {
+@@ -288,6 +306,35 @@ class Assignment {
+       breakTime: breakTime ?? this.breakTime,
+     );
+   }
++
++  Map<String, dynamic> toJson() {
++    return {
++      'id': id,
++      'workerId': workerId,
++      'siteId': siteId,
++      'date': date.toIso8601String(),
++      'shift': shift,
++      'instructions': instructions,
++      'checklist': checklist.map((e) => e.toJson()).toList(),
++      'priority': priority,
++      'breakTime': breakTime,
++    };
++  }
++
++  factory Assignment.fromJson(Map<String, dynamic> json) {
++    var list = json['checklist'] as List? ?? [];
++    return Assignment(
++      id: json['id'] as String,
++      workerId: json['workerId'] as String,
++      siteId: json['siteId'] as String,
++      date: DateTime.parse(json['date'] as String),
++      shift: json['shift'] as String,
++      instructions: json['instructions'] as String,
++      checklist: list.map((e) => ChecklistItem.fromJson(e as Map<String, dynamic>)).toList(),
++      priority: json['priority'] as String,
++      breakTime: json['breakTime'] as String,
++    );
++  }
+ }
+ 
+ class VisitRecord {
+@@ -320,6 +367,31 @@ class VisitRecord {
+       comments: comments,
+     );
+   }
++
++  Map<String, dynamic> toJson() {
++    return {
++      'siteId': siteId,
++      'entryTime': entryTime?.toIso8601String(),
++      'exitTime': exitTime?.toIso8601String(),
++      'status': status,
++      'checklistAtVisit': checklistAtVisit.map((e) => e.toJson()).toList(),
++      'photoPath': photoPath,
++      'comments': comments,
++    };
++  }
++
++  factory VisitRecord.fromJson(Map<String, dynamic> json) {
++    var list = json['checklistAtVisit'] as List? ?? [];
++    return VisitRecord(
++      siteId: json['siteId'] as String,
++      entryTime: json['entryTime'] != null ? DateTime.parse(json['entryTime'] as String) : null,
++      exitTime: json['exitTime'] != null ? DateTime.parse(json['exitTime'] as String) : null,
++      status: json['status'] as String? ?? 'Pending',
++      checklistAtVisit: list.map((e) => ChecklistItem.fromJson(e as Map<String, dynamic>)).toList(),
++      photoPath: json['photoPath'] as String?,
++      comments: json['comments'] as String?,
++    );
++  }
+ }
+ 
+ class AttendanceRecord {
+@@ -348,6 +420,39 @@ class AttendanceRecord {
+     this.supervisorComments = '',
+     this.isApproved = false,
+   });
++
++  Map<String, dynamic> toJson() {
++    return {
++      'id': id,
++      'workerId': workerId,
++      'date': date.toIso8601String(),
++      'shiftStart': shiftStart?.toIso8601String(),
++      'shiftEnd': shiftEnd?.toIso8601String(),
++      'visits': visits.map((e) => e.toJson()).toList(),
++      'overtimeHours': overtimeHours,
++      'normalHours': normalHours,
++      'status': status,
++      'supervisorComments': supervisorComments,
++      'isApproved': isApproved,
++    };
++  }
++
++  factory AttendanceRecord.fromJson(Map<String, dynamic> json) {
++    var list = json['visits'] as List? ?? [];
++    return AttendanceRecord(
++      id: json['id'] as String,
++      workerId: json['workerId'] as String,
++      date: DateTime.parse(json['date'] as String),
++      shiftStart: json['shiftStart'] != null ? DateTime.parse(json['shiftStart'] as String) : null,
++      shiftEnd: json['shiftEnd'] != null ? DateTime.parse(json['shiftEnd'] as String) : null,
++      visits: list.map((e) => VisitRecord.fromJson(e as Map<String, dynamic>)).toList(),
++      overtimeHours: (json['overtimeHours'] as num? ?? 0.0).toDouble(),
++      normalHours: (json['normalHours'] as num? ?? 0.0).toDouble(),
++      status: json['status'] as String? ?? 'Absent',
++      supervisorComments: json['supervisorComments'] as String? ?? '',
++      isApproved: json['isApproved'] as bool? ?? false,
++    );
++  }
+ }
+ 
+ class TamperAlert {
+@@ -364,6 +469,26 @@ class TamperAlert {
+     required this.alertType,
+     required this.details,
+   });
++
++  Map<String, dynamic> toJson() {
++    return {
++      'id': id,
++      'workerId': workerId,
++      'timestamp': timestamp.toIso8601String(),
++      'alertType': alertType,
++      'details': details,
++    };
++  }
++
++  factory TamperAlert.fromJson(Map<String, dynamic> json) {
++    return TamperAlert(
++      id: json['id'] as String,
++      workerId: json['workerId'] as String,
++      timestamp: DateTime.parse(json['timestamp'] as String),
++      alertType: json['alertType'] as String,
++      details: json['details'] as String,
++    );
++  }
+ }
+ 
+ class HeartbeatLog {
+@@ -380,4 +505,68 @@ class HeartbeatLog {
+     required this.latitude,
+     required this.longitude,
+   });
++
++  Map<String, dynamic> toJson() {
++    return {
++      'id': id,
++      'workerId': workerId,
++      'timestamp': timestamp.toIso8601String(),
++      'latitude': latitude,
++      'longitude': longitude,
++    };
++  }
++
++  factory HeartbeatLog.fromJson(Map<String, dynamic> json) {
++    return HeartbeatLog(
++      id: json['id'] as String,
++      workerId: json['workerId'] as String,
++      timestamp: DateTime.parse(json['timestamp'] as String),
++      latitude: (json['latitude'] as num).toDouble(),
++      longitude: (json['longitude'] as num).toDouble(),
++    );
++  }
++}
++
++class AppNotification {
++  final String id;
++  final String title;
++  final String message;
++  final String targetRole; // 'Admin', 'Supervisor', 'Worker'
++  final String? targetWorkerId;
++  final DateTime timestamp;
++  bool isRead;
++
++  AppNotification({
++    required this.id,
++    required this.title,
++    required this.message,
++    required this.targetRole,
++    this.targetWorkerId,
++    required this.timestamp,
++    this.isRead = false,
++  });
++
++  Map<String, dynamic> toJson() {
++    return {
++      'id': id,
++      'title': title,
++      'message': message,
++      'targetRole': targetRole,
++      'targetWorkerId': targetWorkerId,
++      'timestamp': timestamp.toIso8601String(),
++      'isRead': isRead,
++    };
++  }
++
++  factory AppNotification.fromJson(Map<String, dynamic> json) {
++    return AppNotification(
++      id: json['id'] as String,
++      title: json['title'] as String,
++      message: json['message'] as String,
++      targetRole: json['targetRole'] as String,
++      targetWorkerId: json['targetWorkerId'] as String?,
++      timestamp: DateTime.parse(json['timestamp'] as String),
++      isRead: json['isRead'] as bool? ?? false,
++    );
++  }
+ }
+diff --git a/sgs_field_tracker/lib/tracker_state.dart b/sgs_field_tracker/lib/tracker_state.dart
+index 12d24d9..36b17a1 100644
+--- a/sgs_field_tracker/lib/tracker_state.dart
++++ b/sgs_field_tracker/lib/tracker_state.dart
+@@ -1,7 +1,7 @@
+ import 'dart:async';
+ import 'dart:convert';
+ import 'dart:math';
+-import 'dart:html' as html;
++import 'package:shared_preferences/shared_preferences.dart';
+ import 'package:flutter/material.dart';
+ import 'package:intl/intl.dart';
+ import 'package:geolocator/geolocator.dart';
+@@ -9,6 +9,7 @@ import 'package:latlong2/latlong.dart';
+ import 'package:http/http.dart' as http;
+ import 'package:web_socket_channel/web_socket_channel.dart';
+ import 'geofence_model.dart';
++import 'map_service.dart' show kServerBaseUrl, kWsBaseUrl;
+ import 'models.dart';
+ 
+ class TrackerState extends ChangeNotifier {
+@@ -19,6 +20,7 @@ class TrackerState extends ChangeNotifier {
+   List<AttendanceRecord> _attendanceRecords = [];
+   List<TamperAlert> _tamperAlerts = [];
+   List<HeartbeatLog> _heartbeatLogs = [];
++  List<AppNotification> _notifications = [];
+ 
+   // Active user selections
+   String _activeRoleId = 'Admin'; // Admin, Engineer, Supervisor, Worker
+@@ -30,6 +32,10 @@ class TrackerState extends ChangeNotifier {
+   bool _isFakeGpsEnabled = false;
+   bool _isInternetEnabled = true;
+   bool _morningAlarmTriggered = false;
++  bool _morningAlarmEnabled = true;
++  bool _endShiftAlarmEnabled = true;
++  bool _notificationsEnabled = true;
++  bool _endShiftAlarmTriggered = false;
+ 
+   // Live GPS tracking and WebSocket client state
+   WebSocketChannel? _workerWsChannel;
+@@ -85,8 +91,27 @@ class TrackerState extends ChangeNotifier {
+   bool get isFakeGpsEnabled => _isFakeGpsEnabled;
+   bool get isInternetEnabled => _isInternetEnabled;
+   bool get morningAlarmTriggered => _morningAlarmTriggered;
++  bool get morningAlarmEnabled => _morningAlarmEnabled;
++  bool get endShiftAlarmEnabled => _endShiftAlarmEnabled;
++  bool get notificationsEnabled => _notificationsEnabled;
++  bool get endShiftAlarmTriggered => _endShiftAlarmTriggered;
+   DateTime get selectedDate => _selectedDate;
+ 
++  List<AppNotification> get allNotifications => _notifications;
++
++  List<AppNotification> get activeNotifications {
++    if (_activeRoleId == 'Worker') {
++      return _notifications
++          .where((n) => !n.isRead && n.targetRole == 'Worker' && (n.targetWorkerId == null || n.targetWorkerId == _selectedWorkerId))
++          .toList();
++    } else if (_activeRoleId == 'Admin' || _activeRoleId == 'Supervisor') {
++      return _notifications
++          .where((n) => !n.isRead && (n.targetRole == 'Admin' || n.targetRole == 'Supervisor'))
++          .toList();
++    }
++    return [];
++  }
++
+   String get companyShiftStart => _companyShiftStart;
+   int get companyShiftHours => _companyShiftHours;
+   int get companyBreakMinutes => _companyBreakMinutes;
+@@ -155,10 +180,24 @@ class TrackerState extends ChangeNotifier {
+   }
+ 
+   Timer? _geofencePollTimer;
++  bool _isInitialized = false;
++  bool get isInitialized => _isInitialized;
+ 
+   TrackerState() {
+-    _loadWorkersFromStorage();
++    _init();
++  }
++
++  Future<void> _init() async {
++    await _loadSettingsFromStorage();
++    await _loadWorkersFromStorage();
++    await _loadGeofencesFromStorage();
++    await _loadAssignmentsFromStorage();
++    await _loadAttendanceRecordsFromStorage();
++    await _loadTamperAlertsFromStorage();
++    await _loadNotificationsFromStorage();
+     _seedInitialData();
++    _isInitialized = true;
++    notifyListeners();
+     fetchGeofencesFromBackend();
+     _initializeCurrentLocation();
+     _geofencePollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+@@ -166,9 +205,10 @@ class TrackerState extends ChangeNotifier {
+     });
+   }
+ 
+-  void _loadWorkersFromStorage() {
++  Future<void> _loadWorkersFromStorage() async {
+     try {
+-      final jsonStr = html.window.localStorage['sgs_field_tracker_workers'];
++      final prefs = await SharedPreferences.getInstance();
++      final jsonStr = prefs.getString('sgs_field_tracker_workers');
+       if (jsonStr != null && jsonStr.isNotEmpty) {
+         final List<dynamic> list = jsonDecode(jsonStr);
+         _workers = list.map((e) => Worker.fromJson(e as Map<String, dynamic>)).toList();
+@@ -179,7 +219,7 @@ class TrackerState extends ChangeNotifier {
+       debugPrint('Error loading workers from local storage: $e');
+       _workers = [];
+     }
+-    
++
+     if (_workers.isNotEmpty) {
+       _selectedWorkerId = _workers.first.id;
+     } else {
+@@ -187,152 +227,347 @@ class TrackerState extends ChangeNotifier {
+     }
+   }
+ 
+-  void _saveWorkersToStorage() {
++  Future<void> _saveWorkersToStorage() async {
+     try {
++      final prefs = await SharedPreferences.getInstance();
+       final jsonStr = jsonEncode(_workers.map((w) => w.toJson()).toList());
+-      html.window.localStorage['sgs_field_tracker_workers'] = jsonStr;
++      await prefs.setString('sgs_field_tracker_workers', jsonStr);
+     } catch (e) {
+       debugPrint('Error saving workers to local storage: $e');
+     }
+   }
+ 
+-  void _seedInitialData() {
+-    // 1. Seed Sites (including accommodation)
+-    _sites = [];
++  Future<void> _loadSettingsFromStorage() async {
++    try {
++      final prefs = await SharedPreferences.getInstance();
++      _morningAlarmEnabled = prefs.getBool('sgs_morning_alarm_enabled') ?? true;
++      _endShiftAlarmEnabled = prefs.getBool('sgs_end_shift_alarm_enabled') ?? true;
++      _notificationsEnabled = prefs.getBool('sgs_notifications_enabled') ?? true;
++    } catch (e) {
++      debugPrint('Error loading settings from local storage: $e');
++    }
++  }
+ 
+-    DateTime today = DateTime(2026, 6, 17);
+-    _assignments = [];
++  Future<void> _saveSettingsToStorage() async {
++    try {
++      final prefs = await SharedPreferences.getInstance();
++      await prefs.setBool('sgs_morning_alarm_enabled', _morningAlarmEnabled);
++      await prefs.setBool('sgs_end_shift_alarm_enabled', _endShiftAlarmEnabled);
++      await prefs.setBool('sgs_notifications_enabled', _notificationsEnabled);
++    } catch (e) {
++      debugPrint('Error saving settings to local storage: $e');
++    }
++  }
+ 
+-    // 4. Initialize Attendance Records for Today
+-    for (var worker in _workers) {
+-      // Find assignments for this worker
+-      var workerAssigns = _assignments.where((a) => a.workerId == worker.id && isSameDay(a.date, today)).toList();
+-      
+-      List<VisitRecord> visits = [];
+-      for (var wa in workerAssigns) {
+-        visits.add(VisitRecord(
+-          siteId: wa.siteId,
+-          status: 'Pending',
+-          checklistAtVisit: wa.checklist.map((c) => c.copy()).toList(),
+-        ));
+-      }
++  Future<void> _loadGeofencesFromStorage() async {
++    try {
++      final prefs = await SharedPreferences.getInstance();
++      final jsonStr = prefs.getString('sgs_field_tracker_geofences');
++      if (jsonStr != null && jsonStr.isNotEmpty) {
++        final List<dynamic> list = jsonDecode(jsonStr);
++        _backendGeofences = list.map((e) => AppGeofence.fromJson(e as Map<String, dynamic>)).toList();
++        
++        final List<Site> loadedSites = [];
++        for (final fence in _backendGeofences) {
++          final siteId = fence.siteId ?? fence.id;
++          final double lat = fence.center?.latitude ??
++              (fence.polygon != null && fence.polygon!.isNotEmpty
++                  ? (fence.polygon!.map((p) => p.latitude).reduce((a, b) => a + b) / fence.polygon!.length)
++                  : 25.1234);
++          final double lng = fence.center?.longitude ??
++              (fence.polygon != null && fence.polygon!.isNotEmpty
++                  ? (fence.polygon!.map((p) => p.longitude).reduce((a, b) => a + b) / fence.polygon!.length)
++                  : 55.3456);
++          final double radius = fence.radiusM ?? 100.0;
++          
++          final cat = JobCategory.values.firstWhere(
++            (e) => e.name == fence.category || e.toString().split('.').last == fence.category,
++            orElse: () => JobCategory.AMC,
++          );
++          final subCat = SubCategory.values.firstWhere(
++            (e) => e.name == fence.subCategory || e.toString().split('.').last == fence.subCategory,
++            orElse: () => SubCategory.Outdoor,
++          );
++          final jobT = JobType.values.firstWhere(
++            (e) => e.name == fence.jobType || e.toString().split('.').last == fence.jobType,
++            orElse: () => JobType.Permanent,
++          );
++          final freq = JobFrequency.values.firstWhere(
++            (e) => e.name == fence.frequency || e.toString().split('.').last == fence.frequency,
++            orElse: () => JobFrequency.Daily,
++          );
+ 
+-      _attendanceRecords.add(AttendanceRecord(
+-        id: 'att_${worker.id}_${DateFormat('yyyyMMdd').format(today)}',
+-        workerId: worker.id,
+-        date: today,
+-        visits: visits,
+-        status: visits.isEmpty ? 'Present' : 'Absent', // default absent if has visits
+-      ));
++          loadedSites.add(Site(
++            id: siteId,
++            name: fence.name,
++            code: fence.code.isNotEmpty ? fence.code : fence.name.substring(0, min(5, fence.name.length)).toUpperCase(),
++            category: cat,
++            subCategory: subCat,
++            jobType: jobT,
++            frequency: freq,
++            address: fence.address,
++            latitude: lat,
++            longitude: lng,
++            radius: radius,
++            plannedStartTime: fence.plannedStartTime.isNotEmpty ? fence.plannedStartTime : '08:00 AM',
++            plannedEndTime: fence.plannedEndTime.isNotEmpty ? fence.plannedEndTime : '05:00 PM',
++            isAccommodation: fence.isAccommodation,
++          ));
++        }
++        
++        _sites = loadedSites;
++        debugPrint('[TrackerState] Loaded ${_sites.length} sites from local storage');
++      }
++    } catch (e) {
++      debugPrint('Error loading geofences from local storage: $e');
+     }
+   }
+ 
+-  // Setters & Actions
+-  void setActiveRole(String roleId) {
+-    _activeRoleId = roleId;
+-    notifyListeners();
++  Future<void> _saveGeofencesToStorage() async {
++    try {
++      final prefs = await SharedPreferences.getInstance();
++      final jsonStr = jsonEncode(_backendGeofences.map((g) => g.toJson()).toList());
++      await prefs.setString('sgs_field_tracker_geofences', jsonStr);
++      debugPrint('[TrackerState] Saved ${_backendGeofences.length} geofences to local storage');
++    } catch (e) {
++      debugPrint('Error saving geofences to local storage: $e');
++    }
+   }
+ 
+-  void setSelectedWorker(String workerId) {
+-    _closeWorkerWs();
+-    _stopGpsTracking();
++  Future<void> _saveAssignmentsToStorage() async {
++    try {
++      final prefs = await SharedPreferences.getInstance();
++      final jsonStr = jsonEncode(_assignments.map((a) => a.toJson()).toList());
++      await prefs.setString('sgs_field_tracker_assignments', jsonStr);
++      debugPrint('[TrackerState] Saved ${_assignments.length} assignments to local storage');
++    } catch (e) {
++      debugPrint('Error saving assignments to local storage: $e');
++    }
++  }
+ 
+-    _selectedWorkerId = workerId;
++  Future<void> _loadAssignmentsFromStorage() async {
++    try {
++      final prefs = await SharedPreferences.getInstance();
++      final jsonStr = prefs.getString('sgs_field_tracker_assignments');
++      if (jsonStr != null && jsonStr.isNotEmpty) {
++        final List<dynamic> list = jsonDecode(jsonStr);
++        _assignments = list.map((e) => Assignment.fromJson(e as Map<String, dynamic>)).toList();
++        debugPrint('[TrackerState] Loaded ${_assignments.length} assignments from local storage');
++      } else {
++        _assignments = [];
++      }
++    } catch (e) {
++      debugPrint('Error loading assignments from local storage: $e');
++      _assignments = [];
++    }
++  }
+ 
+-    var att = _getCurrentAttendanceRecord(workerId);
+-    if (att != null && att.shiftStart != null && att.shiftEnd == null) {
+-      _connectWorkerWs();
+-      _startGpsTracking();
++  Future<void> _saveAttendanceRecordsToStorage() async {
++    try {
++      final prefs = await SharedPreferences.getInstance();
++      final jsonStr = jsonEncode(_attendanceRecords.map((r) => r.toJson()).toList());
++      await prefs.setString('sgs_field_tracker_attendance', jsonStr);
++      debugPrint('[TrackerState] Saved ${_attendanceRecords.length} attendance records to local storage');
++    } catch (e) {
++      debugPrint('Error saving attendance records to local storage: $e');
+     }
+-    notifyListeners();
+   }
+ 
+-  void setSelectedDate(DateTime date) {
+-    _selectedDate = date;
+-    notifyListeners();
++  Future<void> _loadAttendanceRecordsFromStorage() async {
++    try {
++      final prefs = await SharedPreferences.getInstance();
++      final jsonStr = prefs.getString('sgs_field_tracker_attendance');
++      if (jsonStr != null && jsonStr.isNotEmpty) {
++        final List<dynamic> list = jsonDecode(jsonStr);
++        _attendanceRecords = list.map((e) => AttendanceRecord.fromJson(e as Map<String, dynamic>)).toList();
++        debugPrint('[TrackerState] Loaded ${_attendanceRecords.length} attendance records from local storage');
++      } else {
++        _attendanceRecords = [];
++      }
++    } catch (e) {
++      debugPrint('Error loading attendance records from local storage: $e');
++      _attendanceRecords = [];
++    }
+   }
+ 
+-  void updateShiftSettings({
+-    required String shiftStart,
+-    required int shiftHours,
+-    required int breakMinutes,
+-    required int graceMinutes,
+-    required String lateMark,
+-  }) {
+-    _companyShiftStart = shiftStart;
+-    _companyShiftHours = shiftHours;
+-    _companyBreakMinutes = breakMinutes;
+-    _gracePeriodMinutes = graceMinutes;
+-    _lateMarkTime = lateMark;
+-    notifyListeners();
++  Future<void> _saveTamperAlertsToStorage() async {
++    try {
++      final prefs = await SharedPreferences.getInstance();
++      final jsonStr = jsonEncode(_tamperAlerts.map((a) => a.toJson()).toList());
++      await prefs.setString('sgs_field_tracker_tamper_alerts', jsonStr);
++      debugPrint('[TrackerState] Saved ${_tamperAlerts.length} tamper alerts to local storage');
++    } catch (e) {
++      debugPrint('Error saving tamper alerts to local storage: $e');
++    }
+   }
+ 
+-  // Device configuration settings
+-  void toggleGps(bool enabled) {
+-    _isGpsEnabled = enabled;
+-    if (!enabled) {
+-      triggerTamperAlert(currentWorker.id, 'GPS Disabled During Shift', 'Worker disabled GPS location services.');
+-      _stopGpsTracking();
+-    } else {
+-      final att = _getCurrentAttendanceRecord(currentWorker.id);
+-      if (att != null && att.shiftStart != null && att.shiftEnd == null) {
+-        _startGpsTracking();
++  Future<void> _loadTamperAlertsFromStorage() async {
++    try {
++      final prefs = await SharedPreferences.getInstance();
++      final jsonStr = prefs.getString('sgs_field_tracker_tamper_alerts');
++      if (jsonStr != null && jsonStr.isNotEmpty) {
++        final List<dynamic> list = jsonDecode(jsonStr);
++        _tamperAlerts = list.map((e) => TamperAlert.fromJson(e as Map<String, dynamic>)).toList();
++        debugPrint('[TrackerState] Loaded ${_tamperAlerts.length} tamper alerts from local storage');
++      } else {
++        _tamperAlerts = [];
+       }
++    } catch (e) {
++      debugPrint('Error loading tamper alerts from local storage: $e');
++      _tamperAlerts = [];
+     }
+-    notifyListeners();
+   }
+ 
+-  void toggleFakeGps(bool enabled) {
+-    _isFakeGpsEnabled = enabled;
+-    if (enabled) {
+-      triggerTamperAlert(currentWorker.id, 'Fake Location', 'Mock location coordinates detected on the device.');
++  Future<void> _saveNotificationsToStorage() async {
++    try {
++      final prefs = await SharedPreferences.getInstance();
++      final jsonStr = jsonEncode(_notifications.map((n) => n.toJson()).toList());
++      await prefs.setString('sgs_field_tracker_notifications', jsonStr);
++    } catch (e) {
++      debugPrint('Error saving notifications to local storage: $e');
+     }
+-    notifyListeners();
+   }
+ 
+-  void toggleInternet(bool enabled) {
+-    _isInternetEnabled = enabled;
+-    if (!enabled) {
+-      triggerTamperAlert(currentWorker.id, 'Internet Off', 'Worker disconnected from internet.');
+-      _closeWorkerWs();
+-    } else {
+-      // Re-connected! Sync offline queues
+-      _syncOfflineQueue();
+-      final att = _getCurrentAttendanceRecord(currentWorker.id);
+-      if (att != null && att.shiftStart != null && att.shiftEnd == null) {
+-        _connectWorkerWs();
++  Future<void> _loadNotificationsFromStorage() async {
++    try {
++      final prefs = await SharedPreferences.getInstance();
++      final jsonStr = prefs.getString('sgs_field_tracker_notifications');
++      if (jsonStr != null && jsonStr.isNotEmpty) {
++        final List<dynamic> list = jsonDecode(jsonStr);
++        _notifications = list.map((e) => AppNotification.fromJson(e as Map<String, dynamic>)).toList();
++      } else {
++        _notifications = [];
+       }
++    } catch (e) {
++      debugPrint('Error loading notifications from local storage: $e');
++      _notifications = [];
+     }
++  }
++
++  void addNotification({
++    required String title,
++    required String message,
++    required String targetRole,
++    String? targetWorkerId,
++  }) {
++    final notification = AppNotification(
++      id: 'notif_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(1000)}',
++      title: title,
++      message: message,
++      targetRole: targetRole,
++      targetWorkerId: targetWorkerId,
++      timestamp: _simulatedTime,
++    );
++    _notifications.add(notification);
++    _saveNotificationsToStorage();
+     notifyListeners();
+   }
+ 
+-  void triggerAlarm(bool value) {
+-    _morningAlarmTriggered = value;
+-    if (value) {
+-      // Alarm forces GPS on
+-      _isGpsEnabled = true;
++  void markNotificationAsRead(String id) {
++    int index = _notifications.indexWhere((n) => n.id == id);
++    if (index != -1) {
++      _notifications[index].isRead = true;
++      _saveNotificationsToStorage();
++      notifyListeners();
+     }
++  }
++
++  void clearAllNotifications() {
++    _notifications.clear();
++    _saveNotificationsToStorage();
+     notifyListeners();
+   }
+ 
+-  // Simulated Time Progression
+-  void setSimulatedTime(DateTime time) {
+-    _simulatedTime = time;
+-    
+-    // Check if alarm should be triggered
+-    // Morning alarm triggers 30 mins before accommodation departure (planned exit from ACC-001 is 08:30 AM in initial setup, so alarm at 08:00 AM)
+-    if (_simulatedTime.hour == 8 && _simulatedTime.minute == 0 && !_morningAlarmTriggered) {
+-      _morningAlarmTriggered = true;
++  void triggerBannerNotification(String message) {
++    if (!_notificationsEnabled) return;
++    _activeNotificationBanner = message;
++    notifyListeners();
++
++    Timer(const Duration(seconds: 5), () {
++      _activeNotificationBanner = null;
++      notifyListeners();
++    });
++  }
++
++  void _seedInitialData() {
++    // If not loaded from local storage, start empty. Otherwise keep loaded data.
++    if (_sites.isEmpty) {
++      _sites = [];
+     }
+-    
+-    // Automatically generate background Heartbeat logs every 30 mins if shift is active
+-    var att = _getCurrentAttendanceRecord(currentWorker.id);
+-    if (att != null && att.shiftStart != null && att.shiftEnd == null) {
+-      if (_simulatedTime.minute == 0 || _simulatedTime.minute == 30) {
+-        logHeartbeat(currentWorker.id, 25.2048, 55.2708);
++    if (_assignments.isEmpty) {
++      _assignments = [];
++    }
++
++    DateTime today = DateTime(2026, 6, 17);
++
++    // Seed a demo worker if none exist yet (first launch)
++    if (_workers.isEmpty) {
++      final demoWorker = Worker(
++        id: 'worker_demo',
++        employeeId: 'EMP001',
++        name: 'John Demo',
++        phone: '+971501234567',
++        staffType: StaffType.IP,
++        staffCategory: StaffCategory.Direct,
++        leaveCategory: LeaveCategory.Year1,
++        department: 'Landscaping',
++        designation: 'Field Worker',
++        username: 'john',
++        password: 'password123',
++        staffHierarchy: 'Worker',
++        isActive: true,
++        emiratesId: 'UAE-0000-0000',
++        emiratesIdExpiry: DateTime(2027, 1, 1),
++        passportNo: 'P0000000',
++        passportExpiry: DateTime(2027, 1, 1),
++        labourCardNo: 'LC000000',
++        labourCardExpiry: DateTime(2027, 1, 1),
++        joinedDate: DateTime(2024, 1, 1),
++        leaveDueDate: DateTime(2025, 1, 1),
++      );
++      _workers = [demoWorker];
++      _selectedWorkerId = demoWorker.id;
++      _saveWorkersToStorage(); // persist demo worker
++    }
++
++    // Initialize Attendance Records for Today
++    bool attendanceRecordsChanged = false;
++    for (var worker in _workers) {
++      bool exists = _attendanceRecords.any((r) => r.workerId == worker.id && isSameDay(r.date, today));
++      if (!exists) {
++        var workerAssigns = _assignments.where((a) => a.workerId == worker.id && isSameDay(a.date, today)).toList();
++
++        List<VisitRecord> visits = [];
++        for (var wa in workerAssigns) {
++          visits.add(VisitRecord(
++            siteId: wa.siteId,
++            status: 'Pending',
++            checklistAtVisit: wa.checklist.map((c) => c.copy()..isCompleted = false).toList(),
++          ));
++        }
++
++        _attendanceRecords.add(AttendanceRecord(
++          id: 'att_${worker.id}_${DateFormat('yyyyMMdd').format(today)}',
++          workerId: worker.id,
++          date: today,
++          visits: visits,
++          status: visits.isEmpty ? 'Present' : 'Pending',
++        ));
++        attendanceRecordsChanged = true;
+       }
+     }
++    if (attendanceRecordsChanged) _saveAttendanceRecordsToStorage();
++  }
++
++  // Setters & Actions
++  void setActiveRole(String roleId) {
++    _activeRoleId = roleId;
++    notifyListeners();
++  }
+ 
++  void setSelectedDate(DateTime date) {
++    _selectedDate = date;
++    _seedInitialData(); // ensure attendance records exist for the new date
+     notifyListeners();
+   }
+ 
+@@ -342,6 +577,8 @@ class TrackerState extends ChangeNotifier {
+ 
+   // Business Logic - Shift Operations
+   void startShift(String workerId) {
++    _morningAlarmTriggered = false;
++    _endShiftAlarmTriggered = false;
+     var att = _getOrCreateAttendanceRecord(workerId, _simulatedTime);
+     if (att.shiftStart == null) {
+       att.shiftStart = _simulatedTime;
+@@ -354,6 +591,7 @@ class TrackerState extends ChangeNotifier {
+   }
+ 
+   void endShift(String workerId) {
++    _endShiftAlarmTriggered = false;
+     var att = _getCurrentAttendanceRecord(workerId);
+     if (att != null && att.shiftStart != null && att.shiftEnd == null) {
+       att.shiftEnd = _simulatedTime;
+@@ -388,7 +626,7 @@ class TrackerState extends ChangeNotifier {
+   // Site Management CRUD
+   void addSite(Site site) {
+     _sites.add(site);
+-    
++    _saveGeofencesToStorage();
+     // Update active attendance records to include new site if they have assignments
+     notifyListeners();
+   }
+@@ -397,6 +635,7 @@ class TrackerState extends ChangeNotifier {
+     int index = _sites.indexWhere((s) => s.id == updatedSite.id);
+     if (index != -1) {
+       _sites[index] = updatedSite;
++      _saveGeofencesToStorage();
+       notifyListeners();
+     }
+   }
+@@ -408,12 +647,13 @@ class TrackerState extends ChangeNotifier {
+       final geofenceToPost = updatedGeofence.copyWith(id: fenceId);
+       try {
+         final res = await http.put(
+-          Uri.parse('http://localhost:8080/api/geofences/$fenceId'),
++          Uri.parse('$kServerBaseUrl/api/geofences/$fenceId'),
+           headers: {'Content-Type': 'application/json'},
+           body: jsonEncode(geofenceToPost.toJson()),
+-        );
++        ).timeout(const Duration(seconds: 2));
+         if (res.statusCode == 200) {
+           _backendGeofences[idx] = geofenceToPost;
++          _saveGeofencesToStorage();
+         }
+       } catch (e) {
+         debugPrint('[TrackerState] Edit site error: $e');
+@@ -423,6 +663,7 @@ class TrackerState extends ChangeNotifier {
+     int index = _sites.indexWhere((s) => s.id == updatedSite.id);
+     if (index != -1) {
+       _sites[index] = updatedSite;
++      _saveGeofencesToStorage();
+       notifyListeners();
+     }
+   }
+@@ -432,9 +673,10 @@ class TrackerState extends ChangeNotifier {
+     if (idx != -1) {
+       final fenceId = _backendGeofences[idx].id;
+       try {
+-        final res = await http.delete(Uri.parse('http://localhost:8080/api/geofences/$fenceId'));
++        final res = await http.delete(Uri.parse('$kServerBaseUrl/api/geofences/$fenceId')).timeout(const Duration(seconds: 2));
+         if (res.statusCode == 200) {
+           _backendGeofences.removeAt(idx);
++          _saveGeofencesToStorage();
+         }
+       } catch (e) {
+         debugPrint('[TrackerState] Delete site error: $e');
+@@ -442,6 +684,7 @@ class TrackerState extends ChangeNotifier {
+     }
+     
+     _sites.removeWhere((s) => s.id == siteId);
++    _saveGeofencesToStorage();
+     notifyListeners();
+   }
+ 
+@@ -460,6 +703,7 @@ class TrackerState extends ChangeNotifier {
+       visits: [],
+       status: 'Present', // present if no assigned sites
+     ));
++    _saveAttendanceRecordsToStorage();
+     notifyListeners();
+   }
+ 
+@@ -528,17 +772,17 @@ class TrackerState extends ChangeNotifier {
+       att.visits.add(VisitRecord(
+         siteId: siteId,
+         status: 'Pending',
+-        checklistAtVisit: checklist.map((c) => c.copy()).toList(),
++        checklistAtVisit: checklist.map((c) => c.copy()..isCompleted = false).toList(),
+       ));
+     } else {
+       // update checklist
+       att.visits[visitIndex] = VisitRecord(
+         siteId: siteId,
+         status: att.visits[visitIndex].status,
+-        checklistAtVisit: checklist.map((c) => c.copy()).toList(),
++        checklistAtVisit: checklist.map((c) => c.copy()..isCompleted = false).toList(),
+         entryTime: att.visits[visitIndex].entryTime,
+         exitTime: att.visits[visitIndex].exitTime,
+-        photoPath: att.visits[visitIndex].photoPath,
++        photoPaths: att.visits[visitIndex].photoPaths,
+         comments: att.visits[visitIndex].comments,
+       );
+     }
+@@ -559,7 +803,29 @@ class TrackerState extends ChangeNotifier {
+         att.visits.removeWhere((v) => v.siteId == assign.siteId);
+         _recalculateAttendanceStatus(att);
+       }
+-      notifyListeners();
++    _sendHeartbeatToBackend(lat, lng, 10.0);
++    
++    notifyListeners();
++  }
++      var assign = _assignments[assignIndex];
++      _assignments.removeAt(assignIndex);
++
++      // Remove visit from attendance record
++      var att = _getCurrentAttendanceRecord(assign.workerId);
++      if (att != null) {
++        att.visits.removeWhere((v) => v.siteId == assign.siteId);
++        _recalculateAttendanceStatus(att);
++      }
++      _saveAssignmentsToStorage();
++      _saveAttendanceRecordsToStorage();
++
++      final site = _sites.firstWhere((s) => s.id == assign.siteId, orElse: () => _sites.first);
++      addNotification(
++        title: 'Schedule Removed',
++        message: 'Assignment for "${site.name}" (${site.code}) on ${DateFormat('dd-MMM').format(assign.date)} has been removed.',
++        targetRole: 'Worker',
++        targetWorkerId: assign.workerId,
++      );
+     }
+   }
+ 
+@@ -574,12 +840,12 @@ class TrackerState extends ChangeNotifier {
+     }
+   }
+ 
+-  void submitVisitDetails(String workerId, String siteId, {String? comments, String? photoPath}) {
++  void submitVisitDetails(String workerId, String siteId, {String? comments, List<String>? photoPaths}) {
+     var att = _getCurrentAttendanceRecord(workerId);
+     if (att != null) {
+       var visit = att.visits.firstWhere((v) => v.siteId == siteId);
+       visit.comments = comments;
+-      visit.photoPath = photoPath;
++      visit.photoPaths = photoPaths ?? const [];
+       notifyListeners();
+     }
+   }
+@@ -715,44 +981,6 @@ class TrackerState extends ChangeNotifier {
+       _currentAccuracy = 10.0;
+       _sendHeartbeatToBackend(_currentLat, _currentLng, _currentAccuracy);
+ 
+-      _recalculateAttendanceStatus(att);
+-      notifyListeners();
+-    }
+-  }
+-
+-  // Pending Visit Override (Supervisor / Engineer actions)
+-  void resolvePendingVisit(String recordId, String siteId, String action, {String? explanation}) {
+-    // Action can be: 'present' (mark complete), 'ignore' (remove visit from attendance score), 'completed'
+-    int recordIndex = _attendanceRecords.indexWhere((r) => r.id == recordId);
+-    if (recordIndex != -1) {
+-      var record = _attendanceRecords[recordIndex];
+-      int visitIndex = record.visits.indexWhere((v) => v.siteId == siteId);
+-      if (visitIndex != -1) {
+-        var visit = record.visits[visitIndex];
+-        if (action == 'present' || action == 'completed') {
+-          visit.status = 'Completed';
+-          visit.entryTime ??= DateTime(record.date.year, record.date.month, record.date.day, 9, 0);
+-          visit.exitTime ??= DateTime(record.date.year, record.date.month, record.date.day, 10, 0);
+-          visit.comments = explanation ?? "Resolved by Supervisor";
+-        } else if (action == 'ignore') {
+-          visit.status = 'Skipped';
+-          visit.comments = explanation ?? "Ignored by Supervisor";
+-        }
+-        _recalculateAttendanceStatus(record);
+-        notifyListeners();
+-      }
+-    }
+-  }
+-
+-  // Heartbeat Logs & GPS Alerts
+-  void logHeartbeat(String workerId, double lat, double lng) {
+-    var log = HeartbeatLog(
+-      id: 'hb_${DateTime.now().millisecondsSinceEpoch}',
+-      workerId: workerId,
+-      timestamp: _simulatedTime,
+-      latitude: lat,
+-      longitude: lng,
+-    );
+ 
+     if (_isInternetEnabled) {
+       _heartbeatLogs.add(log);
+@@ -783,246 +1011,61 @@ class TrackerState extends ChangeNotifier {
+     notifyListeners();
+   }
+ 
+-  // ΓöÇΓöÇ Worker WebSocket & Geolocator Tracking Client ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++  // ├óΓÇ¥Γé¼├óΓÇ¥Γé¼ Worker WebSocket & Geolocator Tracking Client ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼
+ 
+   void _connectWorkerWs() {
+     _closeWorkerWs();
+     _workerReconnectTimer?.cancel();
++            longitude: lng,
++            radius: radius,
++            plannedStartTime: fence.plannedStartTime.isNotEmpty ? fence.plannedStartTime : '08:00 AM',
++            plannedEndTime: fence.plannedEndTime.isNotEmpty ? fence.plannedEndTime : '05:00 PM',
+ 
+-    if (!_isInternetEnabled) return;
++      if (_notificationsEnabled) {
++        _activeNotificationBanner = isCamp ? "Returned to accommodation camp" : "Destination Reached: Entered $name";
++        notifyListeners();
+ 
+-    final worker = currentWorker;
+-    // Replace localhost with network IP when debugging on actual phones
+-    final wsUrl = 'ws://localhost:8080/ws?role=worker&workerId=${worker.id}&workerName=${Uri.encodeComponent(worker.name)}';
++        Timer(const Duration(seconds: 4), () {
++          _activeNotificationBanner = null;
++          notifyListeners();
++        });
++      }
+ 
+-    try {
+-      _workerWsChannel = WebSocketChannel.connect(Uri.parse(wsUrl));
+-      _isWorkerWsConnected = true;
+-      _workerReconnectDelay = 2; // reset
+-      notifyListeners();
++      debugPrint('[Geofence] ENTRY detected for $name ($id)');
++    } else if (!isInside && _insideGeofenceIds.contains(id)) {
++      _insideGeofenceIds.remove(id);
+ 
+-      _workerWsChannel!.stream.listen(
+-        (message) {
+-          debugPrint('[WorkerWS] Message from backend: $message');
+-        },
+-        onError: (err) {
+-          debugPrint('[WorkerWS] Error: $err');
+-          _isWorkerWsConnected = false;
+-          notifyListeners();
+-          _scheduleWorkerReconnect();
+-        },
+-        onDone: () {
+-          debugPrint('[WorkerWS] Closed');
+-          _isWorkerWsConnected = false;
++      simulateExitGeofence(currentWorker.id, id);
++
++      final isCamp = name.toLowerCase().contains('camp') || name.toLowerCase().contains('accommodation');
++      if (_notificationsEnabled) {
++        _activeNotificationBanner = isCamp ? "Departure from Camp" : "You Left Assigned Site: Exited $name";
++        notifyListeners();
++
++        Timer(const Duration(seconds: 4), () {
++          _activeNotificationBanner = null;
+           notifyListeners();
+-          _scheduleWorkerReconnect();
+-        },
+-        cancelOnError: false,
+-      );
+-      debugPrint('[WorkerWS] Connected successfully to $wsUrl');
+-    } catch (e) {
+-      debugPrint('[WorkerWS] Connection failed: $e');
+-      _isWorkerWsConnected = false;
+-      notifyListeners();
+-      _scheduleWorkerReconnect();
+-    }
+-  }
++        });
++      }
+ 
+-  void _closeWorkerWs() {
+-    _workerWsChannel?.sink.close();
+-    _workerWsChannel = null;
+-    _isWorkerWsConnected = false;
++      debugPrint('[Geofence] EXIT detected for $name ($id)');
++    }
+   }
+ 
+-  void _scheduleWorkerReconnect() {
+-    _workerReconnectTimer?.cancel();
+-    if (!_isInternetEnabled) return;
+-    
++  Future<void> _sendHeartbeatToBackend(double lat, double lng, double accuracy) async {
+     final att = _getCurrentAttendanceRecord(currentWorker.id);
+-    if (att == null || att.shiftStart == null || att.shiftEnd != null) return;
+-
+-    _workerReconnectTimer = Timer(Duration(seconds: _workerReconnectDelay), () {
+-      _workerReconnectDelay = (_workerReconnectDelay * 2).clamp(2, 60);
+-      _connectWorkerWs();
+-    });
+-  }
++    final isOnShift = att != null && att.shiftStart != null && att.shiftEnd == null;
+ 
+-  Future<void> _startGpsTracking() async {
+-    _stopGpsTracking();
+-
+-    if (!_isGpsEnabled) return;
+-
+-    try {
+-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+-      if (!serviceEnabled) {
+-        debugPrint('[GPS] Location services disabled.');
+-        return;
+-      }
+-
+-      LocationPermission permission = await Geolocator.checkPermission();
+-      if (permission == LocationPermission.denied) {
+-        permission = await Geolocator.requestPermission();
+-        if (permission == LocationPermission.denied) {
+-          debugPrint('[GPS] Permission denied.');
+-          return;
+-        }
+-      }
+-
+-      if (permission == LocationPermission.deniedForever) {
+-        debugPrint('[GPS] Permission permanently denied.');
+-        return;
+-      }
+-
+-      _gpsSubscription = Geolocator.getPositionStream(
+-        locationSettings: const LocationSettings(
+-          accuracy: LocationAccuracy.high,
+-          distanceFilter: 5,
+-        ),
+-      ).listen((pos) {
+-        if (_isFakeGpsEnabled) return; // ignore real movements when fake location spoof is on
+-        _updateLocation(pos.latitude, pos.longitude, pos.accuracy);
+-      }, onError: (err) {
+-        debugPrint('[GPS] Stream error: $err');
+-      });
+-      debugPrint('[GPS] Geolocator listening to updates.');
+-    } catch (e) {
+-      debugPrint('[GPS] Failed to start tracking: $e');
+-    }
+-  }
+-
+-  void _stopGpsTracking() {
+-    _gpsSubscription?.cancel();
+-    _gpsSubscription = null;
+-  }
+-
+-  void _updateLocation(double lat, double lng, double accuracy) {
+-    _currentLat = lat;
+-    _currentLng = lng;
+-    _currentAccuracy = accuracy;
+-
+-    // Check geofence entry/exit boundary crossings
+-    _checkGeofenceTransitions(lat, lng);
+-
+-    notifyListeners();
+-
+-    // Create a local heartbeat log representation
+-    var log = HeartbeatLog(
+-      id: 'hb_${DateTime.now().millisecondsSinceEpoch}',
+-      workerId: currentWorker.id,
+-      timestamp: _simulatedTime,
+-      latitude: lat,
+-      longitude: lng,
+-    );
+-    if (_isInternetEnabled) {
+-      _heartbeatLogs.add(log);
+-    } else {
+-      _offlineHeartbeats.add(log);
+-    }
+-
+-    _sendHeartbeatToBackend(lat, lng, accuracy);
+-  }
+-
+-  bool isPointInPolygon(LatLng point, List<LatLng> polygon) {
+-    int i, j = polygon.length - 1;
+-    bool oddNodes = false;
+-    double x = point.longitude;
+-    double y = point.latitude;
+-
+-    for (i = 0; i < polygon.length; i++) {
+-      if ((polygon[i].latitude < y && polygon[j].latitude >= y ||
+-              polygon[j].latitude < y && polygon[i].latitude >= y) &&
+-          (polygon[i].longitude +
+-                  (y - polygon[i].latitude) /
+-                      (polygon[j].latitude - polygon[i].latitude) *
+-                      (polygon[j].longitude - polygon[i].longitude) <
+-              x)) {
+-        oddNodes = !oddNodes;
+-      }
+-      j = i;
+-    }
+-
+-    return oddNodes;
+-  }
+-
+-  void _checkGeofenceTransitions(double lat, double lng) {
+-    final myPos = LatLng(lat, lng);
+-
+-    // 1. Check static mock sites
+-    for (final site in _sites) {
+-      final double dist = Geolocator.distanceBetween(lat, lng, site.latitude, site.longitude);
+-      final bool isInside = dist <= site.radius;
+-
+-      _evaluateGeofenceTransition(site.id, site.name, isInside);
+-    }
+-
+-    // 2. Check dynamic PostgreSQL geofences
+-    for (final fence in _backendGeofences) {
+-      bool isInside = false;
+-      if (fence.type == GeofenceShape.circle && fence.center != null && fence.radiusM != null) {
+-        final double dist = Geolocator.distanceBetween(
+-          lat, lng, fence.center!.latitude, fence.center!.longitude,
+-        );
+-        isInside = dist <= fence.radiusM!;
+-      } else if (fence.type == GeofenceShape.polygon && fence.polygon != null) {
+-        isInside = isPointInPolygon(myPos, fence.polygon!);
+-      }
+-
+-      _evaluateGeofenceTransition(fence.id, fence.name, isInside);
+-    }
+-  }
+-
+-  void _evaluateGeofenceTransition(String id, String name, bool isInside) {
+-    if (isInside && !_insideGeofenceIds.contains(id)) {
+-      _insideGeofenceIds.add(id);
+-
+-      final isCamp = name.toLowerCase().contains('camp') || name.toLowerCase().contains('accommodation');
+-      if (!isCamp) {
+-        startShift(currentWorker.id);
+-      }
+-
+-      simulateEnterGeofence(currentWorker.id, id);
+-
+-      _activeNotificationBanner = isCamp ? "Returned to accommodation camp" : "Destination Reached: Entered $name";
+-      notifyListeners();
+-
+-      Timer(const Duration(seconds: 4), () {
+-        _activeNotificationBanner = null;
+-        notifyListeners();
+-      });
+-
+-      debugPrint('[Geofence] ENTRY detected for $name ($id)');
+-    } else if (!isInside && _insideGeofenceIds.contains(id)) {
+-      _insideGeofenceIds.remove(id);
+-
+-      simulateExitGeofence(currentWorker.id, id);
+-
+-      final isCamp = name.toLowerCase().contains('camp') || name.toLowerCase().contains('accommodation');
+-      _activeNotificationBanner = isCamp ? "Departure from Camp" : "You Left Assigned Site: Exited $name";
+-      notifyListeners();
+-
+-      Timer(const Duration(seconds: 4), () {
+-        _activeNotificationBanner = null;
+-        notifyListeners();
+-      });
+-
+-      debugPrint('[Geofence] EXIT detected for $name ($id)');
+-    }
+-  }
+-
+-  Future<void> _sendHeartbeatToBackend(double lat, double lng, double accuracy) async {
+-    final att = _getCurrentAttendanceRecord(currentWorker.id);
+-    final isOnShift = att != null && att.shiftStart != null && att.shiftEnd == null;
+-
+-    final payload = {
+-      "type": "location",
+-      "workerId": currentWorker.id,
+-      "workerName": currentWorker.name,
+-      "lat": lat,
+-      "lng": lng,
+-      "accuracy": accuracy,
+-      "isOnShift": isOnShift,
+-      "timestamp": _simulatedTime.toUtc().toIso8601String(),
+-    };
++    final payload = {
++      "type": "location",
++      "workerId": currentWorker.id,
++      "workerName": currentWorker.name,
++      "lat": lat,
++      "lng": lng,
++      "accuracy": accuracy,
++      "isOnShift": isOnShift,
++      "timestamp": _simulatedTime.toUtc().toIso8601String(),
++    };
+ 
+     if (_isInternetEnabled && _isWorkerWsConnected && _workerWsChannel != null) {
+       try {
+@@ -1050,7 +1093,7 @@ class TrackerState extends ChangeNotifier {
+     debugPrint('[Offline] Queued update (${_offlineLocationsBuffer.length} buffered)');
+   }
+ 
+-  // ΓöÇΓöÇ Offline Sync ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++  // ├óΓÇ¥Γé¼├óΓÇ¥Γé¼ Offline Sync ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼
+ 
+   Future<void> _syncOfflineQueue() async {
+     if (_offlineVisits.isNotEmpty) {
+@@ -1086,10 +1129,10 @@ class TrackerState extends ChangeNotifier {
+       for (final item in items) {
+         try {
+           final res = await http.post(
+-            Uri.parse('http://localhost:8080/api/heartbeat'),
++            Uri.parse('$kServerBaseUrl/api/heartbeat'),
+             headers: {'Content-Type': 'application/json'},
+             body: jsonEncode(item),
+-          );
++          ).timeout(const Duration(seconds: 2));
+           if (res.statusCode != 200) {
+             _offlineLocationsBuffer.add(item);
+           } else {
+@@ -1107,7 +1150,7 @@ class TrackerState extends ChangeNotifier {
+ 
+   Future<void> fetchGeofencesFromBackend() async {
+     try {
+-      final res = await http.get(Uri.parse('http://localhost:8080/api/geofences'));
++      final res = await http.get(Uri.parse('$kServerBaseUrl/api/geofences')).timeout(const Duration(seconds: 2));
+       if (res.statusCode == 200) {
+         final list = jsonDecode(res.body) as List<dynamic>;
+         _backendGeofences.clear();
+@@ -1166,7 +1209,7 @@ class TrackerState extends ChangeNotifier {
+         if (newSites.isNotEmpty) {
+           _sites = newSites;
+         }
+-
++        _saveGeofencesToStorage();
+         notifyListeners();
+       }
+     } catch (e) {
+@@ -1233,7 +1276,7 @@ class TrackerState extends ChangeNotifier {
+             .map((a) => VisitRecord(
+                   siteId: a.siteId,
+                   status: 'Pending',
+-                  checklistAtVisit: a.checklist.map((c) => c.copy()).toList(),
++                  checklistAtVisit: a.checklist.map((c) => c.copy()..isCompleted = false).toList(),
+                 ))
+             .toList(),
+       );
+@@ -1246,6 +1289,7 @@ class TrackerState extends ChangeNotifier {
+     // Accommodation exits/entries don't count towards work attendance completions.
+     // Exclude accommodation geofence from calculations
+     var workVisits = record.visits.where((v) {
++      if (_sites.isEmpty) return true;
+       var s = _sites.firstWhere((site) => site.id == v.siteId, orElse: () => _sites.first);
+       return !s.isAccommodation;
+     }).toList();
+@@ -1279,6 +1323,50 @@ class TrackerState extends ChangeNotifier {
+     return d1.year == d2.year && d1.month == d2.month && d1.day == d2.day;
+   }
+ 
++  /// Selects the worker being viewed in the Admin's worker detail view.
++  void setSelectedWorker(String workerId) {
++    _selectedWorkerId = workerId;
++    notifyListeners();
++  }
++
++  /// Programmatically triggers or dismisses the end-of-shift alarm overlay
++  /// on the Worker screen.
++  void triggerEndShiftAlarm(bool value) {
++    _endShiftAlarmTriggered = value;
++    notifyListeners();
++  }
++
++  /// Admin resolves a pending/disputed site visit: either approves or rejects it.
++  /// [action] should be 'Approve' or 'Reject'.
++  void resolvePendingVisit(
++    String attendanceRecordId,
++    String siteId,
++    String action, {
++    String? explanation,
++  }) {
++    final recIdx = _attendanceRecords.indexWhere((r) => r.id == attendanceRecordId);
++    if (recIdx == -1) return;
++
++    final record = _attendanceRecords[recIdx];
++    final visitIdx = record.visits.indexWhere((v) => v.siteId == siteId);
++    if (visitIdx == -1) return;
++
++    final visit = record.visits[visitIdx];
++    final newStatus = action == 'Approve' ? 'Approved' : 'Rejected';
++    record.visits[visitIdx] = VisitRecord(
++      siteId: visit.siteId,
++      status: newStatus,
++      entryTime: visit.entryTime,
++      exitTime: visit.exitTime,
++      checklistAtVisit: visit.checklistAtVisit,
++      comments: visit.comments ?? explanation,
++      photoPaths: visit.photoPaths,
++    );
++
++    _saveAttendanceRecordsToStorage();
++    notifyListeners();
++  }
++
+   @override
+   void dispose() {
+     _geofencePollTimer?.cancel();
+@@ -1288,3 +1376,236 @@ class TrackerState extends ChangeNotifier {
+     super.dispose();
+   }
+ }
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
+diff --git a/sgs_field_tracker/lib/worker_view.dart b/sgs_field_tracker/lib/worker_view.dart
+index b79398f..a74e3d4 100644
+--- a/sgs_field_tracker/lib/worker_view.dart
++++ b/sgs_field_tracker/lib/worker_view.dart
+@@ -1,8 +1,13 @@
++import 'dart:async';
++import 'dart:convert';
++import 'package:http/http.dart' as http;
+ import 'package:flutter/material.dart';
+ import 'package:provider/provider.dart';
+ import 'package:intl/intl.dart';
+ import 'package:flutter_map/flutter_map.dart';
+ import 'package:latlong2/latlong.dart';
++import 'package:url_launcher/url_launcher.dart';
++import 'package:geolocator/geolocator.dart';
+ import 'tracker_state.dart';
+ import 'map_service.dart';
+ import 'geofence_model.dart';
+@@ -17,14 +22,36 @@ class WorkerView extends StatefulWidget {
+ 
+ class _WorkerViewState extends State<WorkerView> {
+   int _currentIndex = 0;
++  Site? _selectedDestinationSite;
++
++  final MapController _mapController = MapController();
++  final TextEditingController _searchCtrl = TextEditingController();
++  String _searchQuery = '';
++  List<Map<String, dynamic>> _placeSuggestions = [];
++  bool _isSearchingPlaces = false;
++  Timer? _debounceTimer;
++
++  @override
++  void dispose() {
++    _searchCtrl.dispose();
++    _debounceTimer?.cancel();
++    super.dispose();
++  }
+ 
+   @override
+   Widget build(BuildContext context) {
+     final state = Provider.of<TrackerState>(context);
+     final worker = state.currentWorker;
++    // Build a safe fallback attendance record (won't crash if list is empty)
+     final att = state.allAttendanceRecords.firstWhere(
+       (r) => r.workerId == worker.id && state.isSameDay(r.date, state.selectedDate),
+-      orElse: () => state.allAttendanceRecords.first,
++      orElse: () => AttendanceRecord(
++        id: 'temp_${worker.id}',
++        workerId: worker.id,
++        date: state.selectedDate,
++        visits: [],
++        status: 'Pending',
++      ),
+     );
+ 
+     return Scaffold(
+@@ -54,6 +81,31 @@ class _WorkerViewState extends State<WorkerView> {
+           // Morning Alarm Overlay (Full-screen alarm)
+           if (state.morningAlarmTriggered)
+             _buildMorningAlarmOverlay(context, state),
++
++          // End Shift Alarm Overlay (Full-screen alarm)
++          if (state.endShiftAlarmTriggered)
++            _buildEndShiftAlarmOverlay(context, state),
++
++          // Floating logout/role switch button
++          Positioned(
++            top: 48,
++            right: 16,
++            child: SafeArea(
++              child: GestureDetector(
++                onTap: () => state.setActiveRole('Admin'),
++                child: Container(
++                  padding: const EdgeInsets.all(8),
++                  decoration: BoxDecoration(
++                    color: const Color(0xFF252530),
++                    shape: BoxShape.circle,
++                    border: Border.all(color: Colors.grey.withOpacity(0.3)),
++                    boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 8)],
++                  ),
++                  child: const Icon(Icons.logout, color: Colors.grey, size: 18),
++                ),
++              ),
++            ),
++          ),
+         ],
+       ),
+       bottomNavigationBar: BottomNavigationBar(
+@@ -362,6 +414,9 @@ class _WorkerViewState extends State<WorkerView> {
+ 
+     final mapSvc = Provider.of<MapService>(context);
+     final workerPos = LatLng(state.currentLat, state.currentLng);
++
++    // Get today's assigned worksites for the active worker
++    final workerAssigns = state.assignments.where((a) => a.workerId == state.currentWorker.id).toList();
+     final myTrail = state.heartbeatLogs
+         .where((h) => h.workerId == state.currentWorker.id)
+         .map((h) => LatLng(h.latitude, h.longitude))
+@@ -412,15 +467,21 @@ class _WorkerViewState extends State<WorkerView> {
+                 child: Stack(
+                   children: [
+                     FlutterMap(
++                      mapController: _mapController,
+                       options: MapOptions(
+                         initialCenter: workerPos,
+                         initialZoom: 14,
+                       ),
+                       children: [
++                        // Google Satellite Hybrid tile layer
+                         TileLayer(
+-                          urlTemplate: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+-                          subdomains: const ['a', 'b', 'c', 'd'],
++                          urlTemplate: 'https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
++                          subdomains: const ['0', '1', '2', '3'],
+                           userAgentPackageName: 'com.sgs.field_tracker',
++                          maxNativeZoom: 20,
++                          maxZoom: 22,
++                          keepBuffer: 4,
++                          tileSize: 256,
+                         ),
+                         if (polygons.isNotEmpty) PolygonLayer(polygons: polygons),
+                         if (circles.isNotEmpty) CircleLayer(circles: circles),
+@@ -433,6 +494,7 @@ class _WorkerViewState extends State<WorkerView> {
+                             )
+                           ]),
+                         MarkerLayer(markers: [
++                          // Worker's current location pin
+                           Marker(
+                             point: workerPos,
+                             width: 60,
+@@ -446,12 +508,16 @@ class _WorkerViewState extends State<WorkerView> {
+                                     shape: BoxShape.circle,
+                                     color: Colors.tealAccent.withOpacity(0.2),
+                                     border: Border.all(
+-                                      color: state.isWorkerWsConnected ? Colors.tealAccent : Colors.orangeAccent,
++                                      color: state.isWorkerWsConnected
++                                          ? Colors.tealAccent
++                                          : Colors.orangeAccent,
+                                       width: 2.5,
+                                     ),
+                                     boxShadow: [
+                                       BoxShadow(
+-                                        color: state.isWorkerWsConnected ? Colors.tealAccent.withOpacity(0.4) : Colors.orangeAccent.withOpacity(0.4),
++                                        color: state.isWorkerWsConnected
++                                            ? Colors.tealAccent.withOpacity(0.4)
++                                            : Colors.orangeAccent.withOpacity(0.4),
+                                         blurRadius: 10,
+                                       )
+                                     ],
+@@ -461,9 +527,78 @@ class _WorkerViewState extends State<WorkerView> {
+                               ],
+                             ),
+                           ),
++                          // Assigned worksite markers
++                          ...workerAssigns.map((assign) {
++                            if (state.sites.isEmpty) return const Marker(point: LatLng(0, 0), child: SizedBox.shrink());
++                            final siteMatches = state.sites.where((s) => s.id == assign.siteId).toList();
++                            if (siteMatches.isEmpty) return const Marker(point: LatLng(0, 0), child: SizedBox.shrink());
++                            final site = siteMatches.first;
++                            final isSelected = _selectedDestinationSite?.id == site.id;
++                            return Marker(
++                              point: LatLng(site.latitude, site.longitude),
++                              width: 60,
++                              height: 60,
++                              child: GestureDetector(
++                                behavior: HitTestBehavior.opaque,
++                                onTap: () {
++                                  setState(() {
++                                    _selectedDestinationSite = site;
++                                  });
++                                },
++                                child: Column(
++                                  mainAxisSize: MainAxisSize.min,
++                                  children: [
++                                    Container(
++                                      padding: const EdgeInsets.all(4),
++                                      decoration: BoxDecoration(
++                                        shape: BoxShape.circle,
++                                        color: isSelected ? Colors.tealAccent : const Color(0xFF1E1E26),
++                                        border: Border.all(
++                                          color: isSelected ? Colors.white : Colors.tealAccent,
++                                          width: 2,
++                                        ),
++                                        boxShadow: [
++                                          BoxShadow(
++                                            color: Colors.black.withOpacity(0.5),
++                                            blurRadius: 4,
++                                          )
++                                        ],
++                                      ),
++                                      child: Icon(
++                                        site.isAccommodation ? Icons.home_work : Icons.location_on,
++                                        color: isSelected ? Colors.black : Colors.tealAccent,
++                                        size: 18,
++                                      ),
++                                    ),
++                                    const SizedBox(height: 2),
++                                    Container(
++                                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
++                                      decoration: BoxDecoration(
++                                        color: Colors.black.withOpacity(0.75),
++                                        borderRadius: BorderRadius.circular(4),
++                                      ),
++                                      child: Text(
++                                        site.code,
++                                        style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
++                                        maxLines: 1,
++                                        overflow: TextOverflow.ellipsis,
++                                      ),
++                                    ),
++                                  ],
++                                ),
++                              ),
++                            );
++                          }),
+                         ]),
+                       ],
+                     ),
++                    // Search bar overlay
++                    Positioned(
++                      top: 12,
++                      left: 12,
++                      right: 130,
++                      child: _buildSearchBar(context, mapSvc, state),
++                    ),
+                     Positioned(
+                       top: 12,
+                       right: 12,
+@@ -475,7 +610,7 @@ class _WorkerViewState extends State<WorkerView> {
+                           border: Border.all(color: state.isWorkerWsConnected ? Colors.tealAccent : Colors.orangeAccent),
+                         ),
+                         child: Text(
+-                          state.isWorkerWsConnected ? 'Connected (WS)' : 'Offline Mode',
++                          state.isWorkerWsConnected ? 'Connected' : 'Offline',
+                           style: TextStyle(
+                             color: state.isWorkerWsConnected ? Colors.tealAccent : Colors.orangeAccent,
+                             fontSize: 10,
+@@ -484,6 +619,80 @@ class _WorkerViewState extends State<WorkerView> {
+                         ),
+                       ),
+                     ),
++
++                    // Travel directions details overlay card
++                    if (_selectedDestinationSite != null)
++                      Positioned(
++                        bottom: 12,
++                        left: 12,
++                        right: 12,
++                        child: Container(
++                          padding: const EdgeInsets.all(12),
++                          decoration: BoxDecoration(
++                            color: const Color(0xFF1E1E26).withOpacity(0.95),
++                            borderRadius: BorderRadius.circular(16),
++                            border: Border.all(color: Colors.tealAccent.withOpacity(0.3)),
++                            boxShadow: [
++                              BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 10)
++                            ],
++                          ),
++                          child: Column(
++                            mainAxisSize: MainAxisSize.min,
++                            crossAxisAlignment: CrossAxisAlignment.start,
++                            children: [
++                              Row(
++                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
++                                children: [
++                                  Expanded(
++                                    child: Text(
++                                      _selectedDestinationSite!.name,
++                                      style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
++                                      overflow: TextOverflow.ellipsis,
++                                    ),
++                                  ),
++                                  IconButton(
++                                    padding: EdgeInsets.zero,
++                                    constraints: const BoxConstraints(),
++                                    icon: const Icon(Icons.close, color: Colors.grey, size: 16),
++                                    onPressed: () {
++                                      setState(() {
++                                        _selectedDestinationSite = null;
++                                      });
++                                    },
++                                  ),
++                                ],
++                              ),
++                              const SizedBox(height: 8),
++                              ElevatedButton.icon(
++                                onPressed: () async {
++                                  final url = Uri.parse(
++                                    'https://www.google.com/maps/dir/?api=1&destination='
++                                    '${_selectedDestinationSite!.latitude},${_selectedDestinationSite!.longitude}'
++                                    '&travelmode=driving',
++                                  );
++                                  try {
++                                    await launchUrl(url, mode: LaunchMode.externalApplication);
++                                  } catch (e) {
++                                    if (context.mounted) {
++                                      ScaffoldMessenger.of(context).showSnackBar(
++                                        SnackBar(content: Text('Could not launch maps: $e')),
++                                      );
++                                    }
++                                  }
++                                },
++                                icon: const Icon(Icons.navigation, size: 14),
++                                label: const Text('Travel in Google Maps', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
++                                style: ElevatedButton.styleFrom(
++                                  backgroundColor: Colors.tealAccent,
++                                  foregroundColor: Colors.black,
++                                  minimumSize: const Size(double.infinity, 32),
++                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
++                                ),
++                              ),
++                            ],
++                          ),
++                        ),
++                      ),
+                   ],
+                 ),
+               ),
+@@ -860,4 +1069,299 @@ class _WorkerViewState extends State<WorkerView> {
+       ),
+     );
+   }
++
++  // ΓöÇΓöÇ Search bar (overlaid on map) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++
++  void _onSearchChanged(String query) {
++    _debounceTimer?.cancel();
++    if (query.trim().length < 3) {
++      setState(() {
++        _placeSuggestions.clear();
++      });
++      return;
++    }
++    _debounceTimer = Timer(const Duration(milliseconds: 600), () {
++      _searchPlaces(query.trim());
++    });
++  }
++
++  Future<void> _searchPlaces(String query) async {
++    if (!mounted) return;
++    setState(() => _isSearchingPlaces = true);
++    try {
++      final url = Uri.parse(
++        'https://nominatim.openstreetmap.org/search?q=${Uri.encodeComponent(query)}&format=json&limit=5',
++      );
++      final response = await http.get(url, headers: {'User-Agent': 'com.sgs.field_tracker'});
++      if (response.statusCode == 200) {
++        final List<dynamic> data = jsonDecode(response.body);
++        if (mounted) {
++          setState(() {
++            _placeSuggestions = data.map((item) => {
++              'display_name': item['display_name'] as String,
++              'lat': double.parse(item['lat'] as String),
++              'lon': double.parse(item['lon'] as String),
++            }).toList();
++          });
++        }
++      }
++    } catch (e) {
++      debugPrint('Nominatim geocoding error: $e');
++    } finally {
++      if (mounted) {
++        setState(() => _isSearchingPlaces = false);
++      }
++    }
++  }
++
++  Widget _buildSearchBar(BuildContext context, MapService mapSvc, TrackerState state) {
++    return Column(
++      mainAxisSize: MainAxisSize.min,
++      crossAxisAlignment: CrossAxisAlignment.start,
++      children: [
++        Container(
++          decoration: BoxDecoration(
++            color: const Color(0xFF1E1E26).withOpacity(0.95),
++            borderRadius: BorderRadius.circular(8),
++            border: Border.all(color: const Color(0xFF2D2D38)),
++            boxShadow: [
++              BoxShadow(
++                color: Colors.black.withOpacity(0.4),
++                blurRadius: 8,
++                offset: const Offset(0, 2),
++              ),
++            ],
++          ),
++          child: TextField(
++            controller: _searchCtrl,
++            style: const TextStyle(color: Colors.white, fontSize: 13),
++            decoration: InputDecoration(
++              hintText: 'Search site or location...',
++              hintStyle: const TextStyle(color: Colors.grey, fontSize: 12),
++              prefixIcon: const Icon(Icons.search, color: Colors.tealAccent, size: 18),
++              suffixIcon: _searchQuery.isNotEmpty
++                  ? IconButton(
++                      icon: const Icon(Icons.clear, color: Colors.grey, size: 16),
++                      onPressed: () {
++                        setState(() {
++                          _searchCtrl.clear();
++                          _searchQuery = '';
++                          _placeSuggestions.clear();
++                        });
++                      },
++                    )
++                  : null,
++              border: InputBorder.none,
++              contentPadding: const EdgeInsets.symmetric(vertical: 12),
++            ),
++            onChanged: (val) {
++              setState(() {
++                _searchQuery = val;
++              });
++              _onSearchChanged(val);
++            },
++          ),
++        ),
++        if (_searchQuery.isNotEmpty) ...[
++          const SizedBox(height: 4),
++          Container(
++            constraints: const BoxConstraints(maxHeight: 200),
++            decoration: BoxDecoration(
++              color: const Color(0xFF1E1E26).withOpacity(0.95),
++              borderRadius: BorderRadius.circular(8),
++              border: Border.all(color: const Color(0xFF2D2D38)),
++              boxShadow: [
++                BoxShadow(
++                  color: Colors.black.withOpacity(0.4),
++                  blurRadius: 8,
++                ),
++              ],
++            ),
++            child: ClipRRect(
++              borderRadius: BorderRadius.circular(8),
++              child: SingleChildScrollView(
++                child: Column(
++                  mainAxisSize: MainAxisSize.min,
++                  children: [
++                    _buildSiteSuggestions(mapSvc),
++                    _buildPlaceSuggestions(),
++                  ],
++                ),
++              ),
++            ),
++          ),
++        ],
++      ],
++    );
++  }
++
++  Widget _buildSiteSuggestions(MapService mapSvc) {
++    final query = _searchQuery.toLowerCase();
++    final matchingFences = mapSvc.geofences.where((g) =>
++        g.name.toLowerCase().contains(query) ||
++        g.code.toLowerCase().contains(query)).toList();
++
++    if (matchingFences.isEmpty) return const SizedBox.shrink();
++
++    return Column(
++      crossAxisAlignment: CrossAxisAlignment.start,
++      mainAxisSize: MainAxisSize.min,
++      children: [
++        Container(
++          width: double.infinity,
++          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
++          color: const Color(0xFF13131A),
++          child: const Text('ASSIGNED SITES', style: TextStyle(color: Colors.tealAccent, fontSize: 9, fontWeight: FontWeight.bold)),
++        ),
++        ...matchingFences.map((g) {
++          LatLng? dest;
++          if (g.type == GeofenceShape.circle && g.center != null) {
++            dest = g.center;
++          } else if (g.type == GeofenceShape.polygon && g.polygon != null && g.polygon!.isNotEmpty) {
++            dest = g.polygon!.first;
++          }
++          return ListTile(
++            dense: true,
++            visualDensity: VisualDensity.compact,
++            title: Text(g.name, style: const TextStyle(color: Colors.white, fontSize: 12)),
++            subtitle: Text('Code: ${g.code} ΓÇó ${g.type.name}', style: const TextStyle(color: Colors.grey, fontSize: 10)),
++            leading: const Icon(Icons.location_on, color: Colors.tealAccent, size: 16),
++            onTap: () {
++              if (dest != null) {
++                _mapController.move(dest, 15);
++              }
++              setState(() {
++                _searchCtrl.clear();
++                _searchQuery = '';
++                _placeSuggestions.clear();
++              });
++            },
++          );
++        }),
++      ],
++    );
++  }
++
++  Widget _buildPlaceSuggestions() {
++    if (_isSearchingPlaces) {
++      return const Padding(
++        padding: EdgeInsets.all(8.0),
++        child: Center(
++          child: SizedBox(
++            width: 16,
++            height: 16,
++            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.tealAccent),
++          ),
++        ),
++      );
++    }
++
++    if (_placeSuggestions.isEmpty) return const SizedBox.shrink();
++
++    return Column(
++      crossAxisAlignment: CrossAxisAlignment.start,
++      mainAxisSize: MainAxisSize.min,
++      children: [
++        Container(
++          width: double.infinity,
++          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
++          color: const Color(0xFF13131A),
++          child: const Text('GLOBAL LOCATIONS', style: TextStyle(color: Colors.blueAccent, fontSize: 9, fontWeight: FontWeight.bold)),
++        ),
++        ..._placeSuggestions.map((p) {
++          final String name = p['display_name'] as String;
++          final double lat = p['lat'] as double;
++          final double lon = p['lon'] as double;
++          return ListTile(
++            dense: true,
++            visualDensity: VisualDensity.compact,
++            title: Text(name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 11)),
++            leading: const Icon(Icons.public, color: Colors.blueAccent, size: 16),
++            onTap: () {
++              _mapController.move(LatLng(lat, lon), 14);
++              setState(() {
++                _searchCtrl.clear();
++                _searchQuery = '';
++                _placeSuggestions.clear();
++              });
++            },
++          );
++        }),
++      ],
++    );
++  }
++
++  // ΓöÇΓöÇ End Shift Alarm Full-Screen Overlay ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++
++  Widget _buildEndShiftAlarmOverlay(BuildContext context, TrackerState state) {
++    return Positioned.fill(
++      child: Container(
++        color: const Color(0xFF0C0C14).withOpacity(0.95),
++        child: Column(
++          mainAxisAlignment: MainAxisAlignment.center,
++          children: [
++            const Icon(Icons.alarm, color: Colors.orangeAccent, size: 80),
++            const SizedBox(height: 24),
++            Text(
++              DateFormat('hh:mm a').format(state.simulatedTime),
++              style: const TextStyle(
++                color: Colors.white,
++                fontSize: 48,
++                fontWeight: FontWeight.bold,
++                fontFamily: 'Courier',
++              ),
++            ),
++            const SizedBox(height: 12),
++            const Text(
++              'Shift Ending Soon! Please End Your Shift',
++              style: TextStyle(color: Colors.grey, fontSize: 16),
++            ),
++            const SizedBox(height: 8),
++            Container(
++              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
++              decoration: BoxDecoration(
++                color: Colors.orange.withOpacity(0.1),
++                borderRadius: BorderRadius.circular(20),
++              ),
++              child: const Row(
++                mainAxisSize: MainAxisSize.min,
++                children: [
++                  Icon(Icons.timer, color: Colors.orangeAccent, size: 14),
++                  SizedBox(width: 4),
++                  Text(
++                    'Shift limit or planned work hours reached',
++                    style: TextStyle(color: Colors.orangeAccent, fontSize: 11),
++                  ),
++                ],
++              ),
++            ),
++            const SizedBox(height: 48),
++            ElevatedButton(
++              onPressed: () {
++                state.triggerEndShiftAlarm(false);
++                state.endShift(state.currentWorker.id);
++              },
++              style: ElevatedButton.styleFrom(
++                backgroundColor: Colors.redAccent,
++                foregroundColor: Colors.white,
++                padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 16),
++                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
++              ),
++              child: const Text('Dismiss & End Shift', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
++            ),
++            const SizedBox(height: 16),
++            TextButton(
++              onPressed: () {
++                state.triggerEndShiftAlarm(false);
++              },
++              style: TextButton.styleFrom(
++                foregroundColor: Colors.grey,
++              ),
++              child: const Text('Keep Working (Overtime)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
++            ),
++          ],
++        ),
++      ),
++    );
++  }
+ }
+diff --git a/sgs_field_tracker/linux/flutter/generated_plugin_registrant.cc b/sgs_field_tracker/linux/flutter/generated_plugin_registrant.cc
+index e71a16d..7299b5c 100644
+--- a/sgs_field_tracker/linux/flutter/generated_plugin_registrant.cc
++++ b/sgs_field_tracker/linux/flutter/generated_plugin_registrant.cc
+@@ -6,6 +6,14 @@
+ 
+ #include "generated_plugin_registrant.h"
+ 
++#include <file_selector_linux/file_selector_plugin.h>
++#include <url_launcher_linux/url_launcher_plugin.h>
+ 
+ void fl_register_plugins(FlPluginRegistry* registry) {
++  g_autoptr(FlPluginRegistrar) file_selector_linux_registrar =
++      fl_plugin_registry_get_registrar_for_plugin(registry, "FileSelectorPlugin");
++  file_selector_plugin_register_with_registrar(file_selector_linux_registrar);
++  g_autoptr(FlPluginRegistrar) url_launcher_linux_registrar =
++      fl_plugin_registry_get_registrar_for_plugin(registry, "UrlLauncherPlugin");
++  url_launcher_plugin_register_with_registrar(url_launcher_linux_registrar);
+ }
+diff --git a/sgs_field_tracker/linux/flutter/generated_plugins.cmake b/sgs_field_tracker/linux/flutter/generated_plugins.cmake
+index be1ee3e..886932b 100644
+--- a/sgs_field_tracker/linux/flutter/generated_plugins.cmake
++++ b/sgs_field_tracker/linux/flutter/generated_plugins.cmake
+@@ -3,6 +3,8 @@
+ #
+ 
+ list(APPEND FLUTTER_PLUGIN_LIST
++  file_selector_linux
++  url_launcher_linux
+ )
+ 
+ list(APPEND FLUTTER_FFI_PLUGIN_LIST
+diff --git a/sgs_field_tracker/macos/Flutter/GeneratedPluginRegistrant.swift b/sgs_field_tracker/macos/Flutter/GeneratedPluginRegistrant.swift
+index d7ee0bc..7ba7a39 100644
+--- a/sgs_field_tracker/macos/Flutter/GeneratedPluginRegistrant.swift
++++ b/sgs_field_tracker/macos/Flutter/GeneratedPluginRegistrant.swift
+@@ -5,10 +5,16 @@
+ import FlutterMacOS
+ import Foundation
+ 
++import file_selector_macos
+ import geolocator_apple
+ import package_info_plus
++import shared_preferences_foundation
++import url_launcher_macos
+ 
+ func RegisterGeneratedPlugins(registry: FlutterPluginRegistry) {
++  FileSelectorPlugin.register(with: registry.registrar(forPlugin: "FileSelectorPlugin"))
+   GeolocatorPlugin.register(with: registry.registrar(forPlugin: "GeolocatorPlugin"))
+   FPPPackageInfoPlusPlugin.register(with: registry.registrar(forPlugin: "FPPPackageInfoPlusPlugin"))
++  SharedPreferencesPlugin.register(with: registry.registrar(forPlugin: "SharedPreferencesPlugin"))
++  UrlLauncherPlugin.register(with: registry.registrar(forPlugin: "UrlLauncherPlugin"))
+ }
+diff --git a/sgs_field_tracker/pubspec.lock b/sgs_field_tracker/pubspec.lock
+index 8e97a41..8154a5a 100644
+--- a/sgs_field_tracker/pubspec.lock
++++ b/sgs_field_tracker/pubspec.lock
+@@ -65,6 +65,14 @@ packages:
+       url: "https://pub.dev"
+     source: hosted
+     version: "1.19.1"
++  cross_file:
++    dependency: transitive
++    description:
++      name: cross_file
++      sha256: "28bb3ae56f117b5aec029d702a90f57d285cd975c3c5c281eaca38dbc47c5937"
++      url: "https://pub.dev"
++    source: hosted
++    version: "0.3.5+2"
+   crypto:
+     dependency: transitive
+     description:
+@@ -129,6 +137,46 @@ packages:
+       url: "https://pub.dev"
+     source: hosted
+     version: "0.1.2"
++  file:
++    dependency: transitive
++    description:
++      name: file
++      sha256: a3b4f84adafef897088c160faf7dfffb7696046cb13ae90b508c2cbc95d3b8d4
++      url: "https://pub.dev"
++    source: hosted
++    version: "7.0.1"
++  file_selector_linux:
++    dependency: transitive
++    description:
++      name: file_selector_linux
++      sha256: "2567f398e06ac72dcf2e98a0c95df2a9edd03c2c2e0cacd4780f20cdf56263a0"
++      url: "https://pub.dev"
++    source: hosted
++    version: "0.9.4"
++  file_selector_macos:
++    dependency: transitive
++    description:
++      name: file_selector_macos
++      sha256: "5e0bbe9c312416f1787a68259ea1505b52f258c587f12920422671807c4d618a"
++      url: "https://pub.dev"
++    source: hosted
++    version: "0.9.5"
++  file_selector_platform_interface:
++    dependency: transitive
++    description:
++      name: file_selector_platform_interface
++      sha256: "35e0bd61ebcdb91a3505813b055b09b79dfdc7d0aee9c09a7ba59ae4bb13dc85"
++      url: "https://pub.dev"
++    source: hosted
++    version: "2.7.0"
++  file_selector_windows:
++    dependency: transitive
++    description:
++      name: file_selector_windows
++      sha256: "62197474ae75893a62df75939c777763d39c2bc5f73ce5b88497208bc269abfd"
++      url: "https://pub.dev"
++    source: hosted
++    version: "0.9.3+5"
+   fixnum:
+     dependency: transitive
+     description:
+@@ -158,6 +206,14 @@ packages:
+       url: "https://pub.dev"
+     source: hosted
+     version: "8.3.0"
++  flutter_plugin_android_lifecycle:
++    dependency: transitive
++    description:
++      name: flutter_plugin_android_lifecycle
++      sha256: "3854fe5e3bff0b113c658f260b90c95dea17c92db0f2addeac2e343dd9969785"
++      url: "https://pub.dev"
++    source: hosted
++    version: "2.0.35"
+   flutter_test:
+     dependency: "direct dev"
+     description: flutter
+@@ -272,6 +328,70 @@ packages:
+       url: "https://pub.dev"
+     source: hosted
+     version: "4.1.2"
++  image_picker:
++    dependency: "direct main"
++    description:
++      name: image_picker
++      sha256: "91c025426c2881c551100bce834e201c835a170151545f58d17da5180ca7d9ac"
++      url: "https://pub.dev"
++    source: hosted
++    version: "1.2.2"
++  image_picker_android:
++    dependency: transitive
++    description:
++      name: image_picker_android
++      sha256: "6f3a1995eafb000333174fae92202622033b0ee7fd917a6cd3730295264df84a"
++      url: "https://pub.dev"
++    source: hosted
++    version: "0.8.13+19"
++  image_picker_for_web:
++    dependency: transitive
++    description:
++      name: image_picker_for_web
++      sha256: "66257a3191ab360d23a55c8241c91a6e329d31e94efa7be9cf7a212e65850214"
++      url: "https://pub.dev"
++    source: hosted
++    version: "3.1.1"
++  image_picker_ios:
++    dependency: transitive
++    description:
++      name: image_picker_ios
++      sha256: b9c4a438a9ff4f60808c9cf0039b93a42bb6c2211ef6ebb647394b2b3fa84588
++      url: "https://pub.dev"
++    source: hosted
++    version: "0.8.13+6"
++  image_picker_linux:
++    dependency: transitive
++    description:
++      name: image_picker_linux
++      sha256: "1f81c5f2046b9ab724f85523e4af65be1d47b038160a8c8deed909762c308ed4"
++      url: "https://pub.dev"
++    source: hosted
++    version: "0.2.2"
++  image_picker_macos:
++    dependency: transitive
++    description:
++      name: image_picker_macos
++      sha256: "86f0f15a309de7e1a552c12df9ce5b59fe927e71385329355aec4776c6a8ec91"
++      url: "https://pub.dev"
++    source: hosted
++    version: "0.2.2+1"
++  image_picker_platform_interface:
++    dependency: transitive
++    description:
++      name: image_picker_platform_interface
++      sha256: "567e056716333a1647c64bb6bd873cff7622233a5c3f694be28a583d4715690c"
++      url: "https://pub.dev"
++    source: hosted
++    version: "2.11.1"
++  image_picker_windows:
++    dependency: transitive
++    description:
++      name: image_picker_windows
++      sha256: d248c86554a72b5495a31c56f060cf73a41c7ff541689327b1a7dbccc33adfae
++      url: "https://pub.dev"
++    source: hosted
++    version: "0.2.2"
+   intl:
+     dependency: "direct main"
+     description:
+@@ -376,6 +496,14 @@ packages:
+       url: "https://pub.dev"
+     source: hosted
+     version: "3.0.0"
++  mime:
++    dependency: transitive
++    description:
++      name: mime
++      sha256: "41a20518f0cb1256669420fdba0cd90d21561e560ac240f26ef8322e45bb7ed6"
++      url: "https://pub.dev"
++    source: hosted
++    version: "2.0.0"
+   nested:
+     dependency: transitive
+     description:
+@@ -536,6 +664,62 @@ packages:
+       url: "https://pub.dev"
+     source: hosted
+     version: "0.6.0"
++  shared_preferences:
++    dependency: "direct main"
++    description:
++      name: shared_preferences
++      sha256: c3025c5534b01739267eb7d76959bbc25a6d10f6988e1c2a3036940133dd10bf
++      url: "https://pub.dev"
++    source: hosted
++    version: "2.5.5"
++  shared_preferences_android:
++    dependency: transitive
++    description:
++      name: shared_preferences_android
++      sha256: "93ae5884a9df5d3bb696825bceb3a17590754548b5d740eba51500afc8d088f5"
++      url: "https://pub.dev"
++    source: hosted
++    version: "2.4.26"
++  shared_preferences_foundation:
++    dependency: transitive
++    description:
++      name: shared_preferences_foundation
++      sha256: "4e7eaffc2b17ba398759f1151415869a34771ba11ebbccd1b0145472a619a64f"
++      url: "https://pub.dev"
++    source: hosted
++    version: "2.5.6"
++  shared_preferences_linux:
++    dependency: transitive
++    description:
++      name: shared_preferences_linux
++      sha256: "580abfd40f415611503cae30adf626e6656dfb2f0cee8f465ece7b6defb40f2f"
++      url: "https://pub.dev"
++    source: hosted
++    version: "2.4.1"
++  shared_preferences_platform_interface:
++    dependency: transitive
++    description:
++      name: shared_preferences_platform_interface
++      sha256: "649dc798a33931919ea356c4305c2d1f81619ea6e92244070b520187b5140ef9"
++      url: "https://pub.dev"
++    source: hosted
++    version: "2.4.2"
++  shared_preferences_web:
++    dependency: transitive
++    description:
++      name: shared_preferences_web
++      sha256: c49bd060261c9a3f0ff445892695d6212ff603ef3115edbb448509d407600019
++      url: "https://pub.dev"
++    source: hosted
++    version: "2.4.3"
++  shared_preferences_windows:
++    dependency: transitive
++    description:
++      name: shared_preferences_windows
++      sha256: "94ef0f72b2d71bc3e700e025db3710911bd51a71cefb65cc609dd0d9a982e3c1"
++      url: "https://pub.dev"
++    source: hosted
++    version: "2.4.1"
+   simple_sparse_list:
+     dependency: transitive
+     description:
+@@ -613,6 +797,70 @@ packages:
+       url: "https://pub.dev"
+     source: hosted
+     version: "1.1.9"
++  url_launcher:
++    dependency: "direct main"
++    description:
++      name: url_launcher
++      sha256: f6a7e5c4835bb4e3026a04793a4199ca2d14c739ec378fdfe23fc8075d0439f8
++      url: "https://pub.dev"
++    source: hosted
++    version: "6.3.2"
++  url_launcher_android:
++    dependency: transitive
++    description:
++      name: url_launcher_android
++      sha256: b413d49b73867ac08dd2f9890efd3cc11f2a0e577618d50843440a1fb3776c32
++      url: "https://pub.dev"
++    source: hosted
++    version: "6.3.32"
++  url_launcher_ios:
++    dependency: transitive
++    description:
++      name: url_launcher_ios
++      sha256: "580fe5dfb51671ae38191d316e027f6b76272b026370708c2d898799750a02b0"
++      url: "https://pub.dev"
++    source: hosted
++    version: "6.4.1"
++  url_launcher_linux:
++    dependency: transitive
++    description:
++      name: url_launcher_linux
++      sha256: d5e14138b3bc193a0f63c10a53c94b91d399df0512b1f29b94a043db7482384a
++      url: "https://pub.dev"
++    source: hosted
++    version: "3.2.2"
++  url_launcher_macos:
++    dependency: transitive
++    description:
++      name: url_launcher_macos
++      sha256: "368adf46f71ad3c21b8f06614adb38346f193f3a59ba8fe9a2fd74133070ba18"
++      url: "https://pub.dev"
++    source: hosted
++    version: "3.2.5"
++  url_launcher_platform_interface:
++    dependency: transitive
++    description:
++      name: url_launcher_platform_interface
++      sha256: "552f8a1e663569be95a8190206a38187b531910283c3e982193e4f2733f01029"
++      url: "https://pub.dev"
++    source: hosted
++    version: "2.3.2"
++  url_launcher_web:
++    dependency: transitive
++    description:
++      name: url_launcher_web
++      sha256: "85c81589622fbc87c1c683aaea164d3604a7777495a79d91e39ffcdec39ddb34"
++      url: "https://pub.dev"
++    source: hosted
++    version: "2.4.3"
++  url_launcher_windows:
++    dependency: transitive
++    description:
++      name: url_launcher_windows
++      sha256: "712c70ab1b99744ff066053cbe3e80c73332b38d46e5e945c98689b2e66fc15f"
++      url: "https://pub.dev"
++    source: hosted
++    version: "3.1.5"
+   uuid:
+     dependency: transitive
+     description:
+@@ -703,4 +951,4 @@ packages:
+     version: "3.1.3"
+ sdks:
+   dart: ">=3.12.2 <4.0.0"
+-  flutter: ">=3.38.4"
++  flutter: ">=3.44.0"
+diff --git a/sgs_field_tracker/pubspec.yaml b/sgs_field_tracker/pubspec.yaml
+index 3af2db2..208f4ba 100644
+--- a/sgs_field_tracker/pubspec.yaml
++++ b/sgs_field_tracker/pubspec.yaml
+@@ -42,6 +42,9 @@ dependencies:
+   web_socket_channel: ^3.0.1
+   geolocator: ^14.0.0
+   http: ^1.2.2
++  shared_preferences: ^2.5.5
++  url_launcher: ^6.3.2
++  image_picker: ^1.2.2
+ 
+ dev_dependencies:
+   flutter_test:

@@ -14,7 +14,9 @@ import 'geofence_model.dart';
 import 'models.dart';
 
 class WorkerView extends StatefulWidget {
-  const WorkerView({super.key});
+  final VoidCallback onLogout;
+
+  const WorkerView({super.key, required this.onLogout});
 
   @override
   State<WorkerView> createState() => _WorkerViewState();
@@ -23,6 +25,7 @@ class WorkerView extends StatefulWidget {
 class _WorkerViewState extends State<WorkerView> {
   int _currentIndex = 0;
   Site? _selectedDestinationSite;
+  bool _isMapFullscreen = false;
 
   final MapController _mapController = MapController();
   final TextEditingController _searchCtrl = TextEditingController();
@@ -47,6 +50,20 @@ class _WorkerViewState extends State<WorkerView> {
       orElse: () => state.allAttendanceRecords.first,
     );
 
+    if (_isMapFullscreen) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF13131A),
+        body: Stack(
+          children: [
+            _buildMapTab(context, state),
+            _buildGeofenceNotificationOverlay(context, state),
+            if (state.morningAlarmTriggered) _buildMorningAlarmOverlay(context, state),
+            if (state.endShiftAlarmTriggered) _buildEndShiftAlarmOverlay(context, state),
+          ],
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: const Color(0xFF13131A),
       body: Stack(
@@ -62,6 +79,7 @@ class _WorkerViewState extends State<WorkerView> {
                     _buildAssignmentsTab(context, state, att),
                     _buildMapTab(context, state),
                     _buildDiagnosticsTab(context, state),
+                    _buildReportsTab(context, state),
                   ],
                 ),
               ),
@@ -101,6 +119,10 @@ class _WorkerViewState extends State<WorkerView> {
           BottomNavigationBarItem(
             icon: Icon(Icons.security),
             label: 'Diagnostics',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.report),
+            label: 'Reports',
           ),
         ],
       ),
@@ -184,7 +206,17 @@ class _WorkerViewState extends State<WorkerView> {
                     const SizedBox(width: 8),
                     const Icon(Icons.warning_amber, color: Colors.orangeAccent, size: 16),
                   ],
-                  const SizedBox(width: 48), // Leave space for the floating logout button
+                  const SizedBox(width: 16),
+                  CircleAvatar(
+                    radius: 18,
+                    backgroundColor: Colors.black.withOpacity(0.6),
+                    child: IconButton(
+                      icon: const Icon(Icons.logout, color: Colors.tealAccent, size: 16),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      onPressed: widget.onLogout,
+                    ),
+                  ),
                 ],
               ),
             ],
@@ -221,12 +253,6 @@ class _WorkerViewState extends State<WorkerView> {
                     _buildShiftButton(context, state, att),
                   ],
                 ),
-                const SizedBox(height: 16),
-                _buildToggleRow(Icons.notifications, Colors.indigoAccent, 'Morning Shift Alarm (30m before departure)', true),
-                const SizedBox(height: 12),
-                _buildToggleRow(Icons.notifications_active, Colors.orangeAccent, 'End Shift Alarm (30m before departure)', true),
-                const SizedBox(height: 12),
-                _buildToggleRow(Icons.phone_in_talk, Colors.tealAccent, 'Enable Shift Notifications', true),
               ],
             ),
           )
@@ -235,7 +261,7 @@ class _WorkerViewState extends State<WorkerView> {
     );
   }
 
-  Widget _buildToggleRow(IconData icon, Color iconColor, String text, bool value) {
+  Widget _buildToggleRow(IconData icon, Color iconColor, String text, bool value, void Function(bool)? onChanged) {
     return Row(
       children: [
         Icon(icon, color: iconColor, size: 20),
@@ -245,7 +271,7 @@ class _WorkerViewState extends State<WorkerView> {
         ),
         Switch(
           value: value,
-          onChanged: (_) {},
+          onChanged: onChanged,
           activeColor: Colors.tealAccent,
           activeTrackColor: Colors.tealAccent.withOpacity(0.3),
         ),
@@ -292,145 +318,218 @@ class _WorkerViewState extends State<WorkerView> {
   }
 
   Widget _buildAssignmentsTab(BuildContext context, TrackerState state, AttendanceRecord att) {
-    // Separate accommodation and regular sites
-    var workerAssigns = state.assignments.where((a) => a.workerId == state.currentWorker.id).toList();
+    var workerAssigns = state.assignments.where((a) => a.workerId == state.currentWorker.id && state.isSameDay(a.date, state.selectedDate)).toList();
 
-    if (workerAssigns.isEmpty) {
-      return const Center(
-        child: Text(
-          'No sites assigned for today.',
-          style: TextStyle(color: Colors.grey),
-        ),
-      );
+    var filteredAssigns = workerAssigns;
+    if (_searchQuery.isNotEmpty) {
+      filteredAssigns = workerAssigns.where((a) {
+        var site = state.sites.firstWhere((s) => s.id == a.siteId, orElse: () => state.sites.first);
+        return site.name.toLowerCase().contains(_searchQuery.toLowerCase()) || 
+               (site.code.toLowerCase().contains(_searchQuery.toLowerCase()));
+      }).toList();
     }
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: workerAssigns.length,
-      itemBuilder: (context, index) {
-        var assign = workerAssigns[index];
-        var site = state.sites.firstWhere((s) => s.id == assign.siteId, orElse: () => state.sites.first);
-        var visit = att.visits.firstWhere(
-          (v) => v.siteId == site.id,
-          orElse: () => VisitRecord(siteId: site.id, checklistAtVisit: assign.checklist.map((c) => c.copy()).toList()),
-        );
-
-        Color statusColor = Colors.grey;
-        if (visit.status == 'Completed') {
-          statusColor = Colors.greenAccent;
-        } else if (visit.status == 'Entry Recorded') {
-          statusColor = Colors.orangeAccent;
-        }
-
-        return Card(
-          color: const Color(0xFF1E1E26),
-          margin: const EdgeInsets.only(bottom: 12),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: BorderSide(color: Colors.grey.withOpacity(0.1)),
-          ),
-          child: InkWell(
-            onTap: () => _showSiteDetailsSheet(context, state, assign, site, visit),
-            borderRadius: BorderRadius.circular(16),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          site.name,
-                          style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: statusColor.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          visit.status == 'Entry Recorded' ? 'On Site' : visit.status,
-                          style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Code: ${site.code} • ${site.jobType.name}',
-                    style: const TextStyle(color: Colors.grey, fontSize: 11),
-                  ),
-                  const Divider(color: Color(0xFF2D2D38), height: 20),
-                  Row(
-                    children: [
-                      const Icon(Icons.access_time, color: Colors.grey, size: 14),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Planned: ${site.plannedStartTime} - ${site.plannedEndTime}',
-                        style: const TextStyle(color: Colors.grey, fontSize: 11),
-                      ),
-                      const Spacer(),
-                      _buildPriorityTag(assign.priority),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () async {
-                        final url = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=${site.latitude},${site.longitude}&travelmode=driving');
-                        try {
-                          await launchUrl(url, mode: LaunchMode.externalApplication);
-                        } catch (e) {
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Could not launch maps: $e')),
-                            );
-                          }
-                        }
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: TextField(
+            controller: _searchCtrl,
+            onChanged: (v) => setState(() => _searchQuery = v),
+            style: const TextStyle(color: Colors.white),
+            decoration: InputDecoration(
+              hintText: 'Search site name or code...',
+              hintStyle: const TextStyle(color: Colors.grey),
+              prefixIcon: const Icon(Icons.search, color: Colors.grey),
+              suffixIcon: _searchQuery.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear, color: Colors.grey),
+                      onPressed: () {
+                        _searchCtrl.clear();
+                        setState(() => _searchQuery = '');
                       },
-                      icon: const Icon(Icons.directions, color: Colors.black, size: 16),
-                      label: const Text('GET DIRECTIONS (GOOGLE MAPS)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.tealAccent,
-                        foregroundColor: Colors.black,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                    ),
-                  ),
-                  if (visit.entryTime != null) ...[
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        const Icon(Icons.login, color: Colors.greenAccent, size: 14),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Entry: ${DateFormat('hh:mm a').format(visit.entryTime!)}',
-                          style: const TextStyle(color: Colors.greenAccent, fontSize: 11),
-                        ),
-                        if (visit.exitTime != null) ...[
-                          const SizedBox(width: 16),
-                          const Icon(Icons.logout, color: Colors.redAccent, size: 14),
-                          const SizedBox(width: 6),
-                          Text(
-                            'Exit: ${DateFormat('hh:mm a').format(visit.exitTime!)}',
-                            style: const TextStyle(color: Colors.redAccent, fontSize: 11),
-                          ),
-                        ]
-                      ],
                     )
-                  ]
-                ],
+                  : null,
+              filled: true,
+              fillColor: const Color(0xFF1E1E26),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
               ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: Colors.grey.withOpacity(0.2)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: Color(0xFF00BFA5)),
+              ),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             ),
           ),
-        );
-      },
+        ),
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                // Alarms and Notifications Settings
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF252530),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Column(
+                    children: [
+                      _buildToggleRow(Icons.notifications, Colors.indigoAccent, 'Morning Shift Alarm (30m before departure)', state.morningAlarmEnabled, (val) => state.toggleMorningAlarmEnabled(val)),
+                      const SizedBox(height: 12),
+                      _buildToggleRow(Icons.notifications_active, Colors.orangeAccent, 'End Shift Alarm (30m before departure)', state.endShiftAlarmEnabled, (val) => state.toggleEndShiftAlarmEnabled(val)),
+                      const SizedBox(height: 12),
+                      _buildToggleRow(Icons.phone_in_talk, Colors.tealAccent, 'Enable Shift Notifications', state.notificationsEnabled, (val) => state.toggleNotificationsEnabled(val)),
+                    ],
+                  ),
+                ),
+                
+                if (workerAssigns.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 32),
+                    child: Center(
+                      child: Text(
+                        'No sites assigned for today.',
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    ),
+                  )
+                else
+                  ...filteredAssigns.map((assign) {
+              var site = state.sites.firstWhere((s) => s.id == assign.siteId, orElse: () => state.sites.first);
+              var visit = att.visits.firstWhere(
+                (v) => v.siteId == site.id,
+                orElse: () => VisitRecord(siteId: site.id, checklistAtVisit: assign.checklist.map((c) => c.copy()).toList()),
+              );
+
+              Color statusColor = Colors.grey;
+              if (visit.status == 'Completed') {
+                statusColor = Colors.greenAccent;
+              } else if (visit.status == 'Entry Recorded') {
+                statusColor = Colors.orangeAccent;
+              }
+
+              return Card(
+                color: const Color(0xFF1E1E26),
+                margin: const EdgeInsets.only(bottom: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  side: BorderSide(color: Colors.grey.withOpacity(0.1)),
+                ),
+                child: InkWell(
+                  onTap: () => _showSiteDetailsSheet(context, state, assign, site, visit),
+                  borderRadius: BorderRadius.circular(16),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                site.name,
+                                style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: statusColor.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                visit.status == 'Entry Recorded' ? 'On Site' : visit.status,
+                                style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Code: ${site.code} • ${site.jobType.name}',
+                          style: const TextStyle(color: Colors.grey, fontSize: 11),
+                        ),
+                        const Divider(color: Color(0xFF2D2D38), height: 20),
+                        Row(
+                          children: [
+                            const Icon(Icons.access_time, color: Colors.grey, size: 14),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Planned: ${site.plannedStartTime} - ${site.plannedEndTime}',
+                              style: const TextStyle(color: Colors.grey, fontSize: 11),
+                            ),
+                            const Spacer(),
+                            _buildPriorityTag(assign.priority),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed: () async {
+                              final url = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=${site.latitude},${site.longitude}&travelmode=driving');
+                              try {
+                                await launchUrl(url, mode: LaunchMode.externalApplication);
+                              } catch (e) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Could not launch maps: $e')),
+                                  );
+                                }
+                              }
+                            },
+                            icon: const Icon(Icons.directions, color: Colors.black, size: 16),
+                            label: const Text('GET DIRECTIONS (GOOGLE MAPS)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.tealAccent,
+                              foregroundColor: Colors.black,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                            ),
+                          ),
+                        ),
+                        if (visit.entryTime != null) ...[
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              const Icon(Icons.login, color: Colors.greenAccent, size: 14),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Entry: ${DateFormat('hh:mm a').format(visit.entryTime!)}',
+                                style: const TextStyle(color: Colors.greenAccent, fontSize: 11),
+                              ),
+                              if (visit.exitTime != null) ...[
+                                const SizedBox(width: 16),
+                                const Icon(Icons.logout, color: Colors.redAccent, size: 14),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Exit: ${DateFormat('hh:mm a').format(visit.exitTime!)}',
+                                  style: const TextStyle(color: Colors.redAccent, fontSize: 11),
+                                ),
+                              ]
+                            ],
+                          )
+                        ]
+                      ],
+                    ),
+                  ),
+                ),
+              );
+              }).toList(),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -495,7 +594,17 @@ class _WorkerViewState extends State<WorkerView> {
       }
     }
 
-    return Padding(
+    return _isMapFullscreen
+        ? Stack(
+            children: [
+              Positioned.fill(
+                child: ClipRRect(
+                  child: _buildMapContent(state, mapSvc, workerPos, polygons, circles, myTrail),
+                ),
+              ),
+            ],
+          )
+        : Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
@@ -508,14 +617,67 @@ class _WorkerViewState extends State<WorkerView> {
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(24),
-                child: Stack(
-                  children: [
-                    FlutterMap(
-                      mapController: _mapController,
-                      options: MapOptions(
-                        initialCenter: workerPos,
-                        initialZoom: 14,
+                child: _buildMapContent(state, mapSvc, workerPos, polygons, circles, myTrail),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          // Location card info
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E1E26),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.my_location, color: Colors.tealAccent),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Coordinates: ${state.currentLat.toStringAsFixed(5)}° N, ${state.currentLng.toStringAsFixed(5)}° E',
+                        style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
                       ),
+                      Text(
+                        'Accuracy: ± ${state.currentAccuracy.toStringAsFixed(1)} meters • status: ${state.isGpsEnabled ? "GPS Active" : "GPS Disabled"}',
+                        style: const TextStyle(color: Colors.grey, fontSize: 10),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: state.isGpsEnabled ? Colors.green : Colors.red,
+                    shape: BoxShape.circle,
+                  ),
+                  width: 10,
+                  height: 10,
+                )
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMapContent(TrackerState state, MapService mapSvc, LatLng workerPos,
+      List<Polygon> polygons, List<CircleMarker> circles, List<LatLng> myTrail) {
+    return Container(
+      color: Colors.black, // Explicit black background for empty spaces
+      child: Stack(
+        children: [
+          FlutterMap(
+            mapController: _mapController,
+            options: MapOptions(
+              initialCenter: workerPos,
+              initialZoom: 14,
+              backgroundColor: Colors.black, // Prevents blue tint on tile load
+            ),
                       children: [
                         TileLayer(
                           urlTemplate: 'https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
@@ -666,6 +828,56 @@ class _WorkerViewState extends State<WorkerView> {
                         ),
                       ),
                     ),
+                    // Map Action Buttons (Fit Bounds, Fullscreen)
+                    Positioned(
+                      bottom: _selectedDestinationSite != null ? 140 : 12,
+                      right: 12,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          GestureDetector(
+                            onTap: () {
+                              final bounds = LatLngBounds.fromPoints([
+                                workerPos,
+                                ...state.assignments
+                                    .where((a) => a.workerId == state.currentWorker.id)
+                                    .map((a) {
+                                      final s = state.sites.firstWhere((s) => s.id == a.siteId, orElse: () => state.sites.first);
+                                      return LatLng(s.latitude, s.longitude);
+                                    })
+                              ]);
+                              _mapController.fitCamera(CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(40)));
+                            },
+                            child: Container(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.75),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.white.withOpacity(0.2)),
+                              ),
+                              child: const Icon(Icons.center_focus_strong, color: Colors.white, size: 20),
+                            ),
+                          ),
+                          GestureDetector(
+                            onTap: () => setState(() => _isMapFullscreen = !_isMapFullscreen),
+                            child: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.75),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.white.withOpacity(0.2)),
+                              ),
+                              child: Icon(
+                                _isMapFullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
+                                color: Colors.white,
+                                size: 20,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                     // Travel directions details overlay card
                     if (_selectedDestinationSite != null)
                       Positioned(
@@ -760,54 +972,9 @@ class _WorkerViewState extends State<WorkerView> {
                           ),
                         ),
                       ),
-
                   ],
                 ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          // Location card info
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1E1E26),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.my_location, color: Colors.tealAccent),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Coordinates: ${state.currentLat.toStringAsFixed(5)}° N, ${state.currentLng.toStringAsFixed(5)}° E',
-                        style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                      ),
-                      Text(
-                        'Accuracy: ± ${state.currentAccuracy.toStringAsFixed(1)} meters • status: ${state.isGpsEnabled ? "GPS Active" : "GPS Disabled"}',
-                        style: const TextStyle(color: Colors.grey, fontSize: 10),
-                      ),
-                    ],
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: state.isGpsEnabled ? Colors.green : Colors.red,
-                    shape: BoxShape.circle,
-                  ),
-                  width: 10,
-                  height: 10,
-                )
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
+              );
   }
 
   Widget _buildDiagnosticsTab(BuildContext context, TrackerState state) {
@@ -874,6 +1041,434 @@ class _WorkerViewState extends State<WorkerView> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildReportsTab(BuildContext context, TrackerState state) {
+    final workerReports = state.allReports.where((r) => r.workerId == state.currentWorker.id).toList();
+    
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ElevatedButton.icon(
+            onPressed: () => _showNewReportForm(context, state),
+            icon: const Icon(Icons.add, color: Colors.black),
+            label: const Text('NEW REPORT', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.tealAccent,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Text('MY REPORTS', style: TextStyle(color: Colors.grey, fontSize: 11, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Expanded(
+            child: workerReports.isEmpty
+                ? const Center(child: Text('No reports submitted yet.', style: TextStyle(color: Colors.grey)))
+                : ListView.builder(
+                    itemCount: workerReports.length,
+                    itemBuilder: (context, index) {
+                      final report = workerReports[index];
+                      return Card(
+                        color: const Color(0xFF1E1E26),
+                        margin: const EdgeInsets.only(bottom: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: BorderSide(color: Colors.grey.withOpacity(0.1)),
+                        ),
+                        child: ListTile(
+                          onTap: () => _showReportDetails(context, report, state),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          title: Text(report.title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const SizedBox(height: 4),
+                              Text('${report.category} • ${DateFormat('MMM dd, hh:mm a').format(report.submittedAt)}', style: const TextStyle(color: Colors.grey, fontSize: 11)),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  _buildStatusBadge(report.status),
+                                  const SizedBox(width: 8),
+                                  _buildPriorityBadge(report.priority),
+                                ],
+                              )
+                            ],
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.edit, color: Colors.blueAccent, size: 20),
+                                onPressed: () => _showEditReportForm(context, report, state),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.delete, color: Colors.redAccent, size: 20),
+                                onPressed: () => _confirmDeleteReport(context, report, state),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatusBadge(ReportStatus status) {
+    Color color;
+    switch (status) {
+      case ReportStatus.Open: color = Colors.blueAccent; break;
+      case ReportStatus.InProgress: color = Colors.orangeAccent; break;
+      case ReportStatus.Resolved: color = Colors.greenAccent; break;
+      case ReportStatus.Closed: color = Colors.grey; break;
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(4)),
+      child: Text(status.name, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
+    );
+  }
+
+  Widget _buildPriorityBadge(ReportPriority priority) {
+    Color color;
+    switch (priority) {
+      case ReportPriority.Low: color = Colors.greenAccent; break;
+      case ReportPriority.Medium: color = Colors.orangeAccent; break;
+      case ReportPriority.High: color = Colors.redAccent; break;
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(4)),
+      child: Text(priority.name.toUpperCase(), style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
+    );
+  }
+
+  void _showNewReportForm(BuildContext context, TrackerState state) {
+    String title = '';
+    String description = '';
+    String category = 'Equipment Issue';
+    ReportPriority priority = ReportPriority.Low;
+
+    final categories = [
+      'Equipment Issue', 'Site Issue', 'Safety Hazard', 'Incident / Accident',
+      'Customer Complaint', 'Maintenance Request', 'Delay / Schedule Issue',
+      'Access Issue', 'Damage / Vandalism', 'Supply / Inventory',
+      'Weather / Environmental', 'General Report', 'Other'
+    ];
+    final workerAssigns = state.assignments.where((a) => a.workerId == state.currentWorker.id && state.isSameDay(a.date, state.selectedDate)).toList();
+    final assignedSites = workerAssigns.map((a) => state.sites.firstWhere((s) => s.id == a.siteId, orElse: () => state.sites.first)).toList();
+    String? selectedSiteId = assignedSites.isNotEmpty ? assignedSites.first.id : null;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF1E1E26),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom, left: 20, right: 20, top: 20),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text('Create New Report', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 16),
+                    TextField(
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(labelText: 'Report Title', labelStyle: TextStyle(color: Colors.grey)),
+                      onChanged: (val) => title = val,
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      value: category,
+                      dropdownColor: const Color(0xFF2D2D38),
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(labelText: 'Category', labelStyle: TextStyle(color: Colors.grey)),
+                      items: categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+                      onChanged: (val) {
+                        if (val != null) setModalState(() => category = val);
+                      },
+                    ),
+                    if (category == 'Site Issue') ...[
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        value: selectedSiteId,
+                        dropdownColor: const Color(0xFF2D2D38),
+                        style: const TextStyle(color: Colors.white),
+                        decoration: const InputDecoration(labelText: 'Select Site', labelStyle: TextStyle(color: Colors.grey)),
+                        items: assignedSites.isNotEmpty 
+                            ? assignedSites.map((s) => DropdownMenuItem(value: s.id, child: Text(s.name))).toList()
+                            : [const DropdownMenuItem(value: null, child: Text('No assigned sites', style: TextStyle(color: Colors.grey)))],
+                        onChanged: (val) {
+                          if (val != null) setModalState(() => selectedSiteId = val);
+                        },
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<ReportPriority>(
+                      value: priority,
+                      dropdownColor: const Color(0xFF2D2D38),
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(labelText: 'Priority', labelStyle: TextStyle(color: Colors.grey)),
+                      items: ReportPriority.values.map((p) => DropdownMenuItem(value: p, child: Text(p.name))).toList(),
+                      onChanged: (val) {
+                        if (val != null) setModalState(() => priority = val);
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      style: const TextStyle(color: Colors.white),
+                      maxLines: 3,
+                      decoration: const InputDecoration(labelText: 'Description', labelStyle: TextStyle(color: Colors.grey)),
+                      onChanged: (val) => description = val,
+                    ),
+                    const SizedBox(height: 16),
+                    OutlinedButton.icon(
+                      onPressed: () {},
+                      icon: const Icon(Icons.camera_alt, color: Colors.tealAccent),
+                      label: const Text('Attach Photos (Coming Soon)', style: TextStyle(color: Colors.tealAccent)),
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.tealAccent, foregroundColor: Colors.black, padding: const EdgeInsets.symmetric(vertical: 16)),
+                      onPressed: () {
+                        if (title.isEmpty) return;
+                        final report = Report(
+                          id: 'rep_${DateTime.now().millisecondsSinceEpoch}',
+                          workerId: state.currentWorker.id,
+                          siteId: (category == 'Site Issue' && selectedSiteId != null) 
+                                    ? selectedSiteId! 
+                                    : (state.allSimulatableSites.isNotEmpty ? state.allSimulatableSites.first.id : 'unknown'),
+                          title: title,
+                          description: description,
+                          category: category,
+                          priority: priority,
+                          submittedAt: DateTime.now(),
+                          latitude: state.currentLat,
+                          longitude: state.currentLng,
+                        );
+                        state.submitReport(report);
+                        Navigator.pop(ctx);
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Report submitted successfully!'), backgroundColor: Colors.green));
+                      },
+                      child: const Text('SUBMIT REPORT', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                    const SizedBox(height: 20),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _confirmDeleteReport(BuildContext context, Report report, TrackerState state) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E26),
+        title: const Text('Delete Report', style: TextStyle(color: Colors.white)),
+        content: const Text('Are you sure you want to delete this report? This action cannot be undone.', style: TextStyle(color: Colors.grey)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () {
+              state.deleteReport(report.id);
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Report deleted'), backgroundColor: Colors.red));
+            },
+            child: const Text('Delete', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showEditReportForm(BuildContext context, Report report, TrackerState state) {
+    String title = report.title;
+    String description = report.description;
+    String category = report.category;
+    ReportPriority priority = report.priority;
+    String? selectedSiteId = report.siteId;
+
+    final categories = [
+      'Equipment Issue', 'Site Issue', 'Safety Hazard', 'Incident / Accident',
+      'Customer Complaint', 'Maintenance Request', 'Delay / Schedule Issue',
+      'Access Issue', 'Damage / Vandalism', 'Supply / Inventory',
+      'Weather / Environmental', 'General Report', 'Other'
+    ];
+    final workerAssigns = state.assignments.where((a) => a.workerId == state.currentWorker.id && state.isSameDay(a.date, state.selectedDate)).toList();
+    final assignedSites = workerAssigns.map((a) => state.sites.firstWhere((s) => s.id == a.siteId, orElse: () => state.sites.first)).toList();
+    
+    // Ensure selectedSiteId is valid if category is 'Site Issue'
+    if (category == 'Site Issue' && !assignedSites.any((s) => s.id == selectedSiteId)) {
+      selectedSiteId = assignedSites.isNotEmpty ? assignedSites.first.id : null;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF1E1E26),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom, left: 20, right: 20, top: 20),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text('Edit Report', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: TextEditingController(text: title)..selection = TextSelection.collapsed(offset: title.length),
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(labelText: 'Report Title', labelStyle: TextStyle(color: Colors.grey)),
+                      onChanged: (val) => title = val,
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      value: category,
+                      dropdownColor: const Color(0xFF2D2D38),
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(labelText: 'Category', labelStyle: TextStyle(color: Colors.grey)),
+                      items: categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+                      onChanged: (val) {
+                        if (val != null) setModalState(() => category = val);
+                      },
+                    ),
+                    if (category == 'Site Issue') ...[
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        value: selectedSiteId,
+                        dropdownColor: const Color(0xFF2D2D38),
+                        style: const TextStyle(color: Colors.white),
+                        decoration: const InputDecoration(labelText: 'Select Site', labelStyle: TextStyle(color: Colors.grey)),
+                        items: assignedSites.isNotEmpty 
+                            ? assignedSites.map((s) => DropdownMenuItem(value: s.id, child: Text(s.name))).toList()
+                            : [const DropdownMenuItem(value: null, child: Text('No assigned sites', style: TextStyle(color: Colors.grey)))],
+                        onChanged: (val) {
+                          if (val != null) setModalState(() => selectedSiteId = val);
+                        },
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<ReportPriority>(
+                      value: priority,
+                      dropdownColor: const Color(0xFF2D2D38),
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(labelText: 'Priority', labelStyle: TextStyle(color: Colors.grey)),
+                      items: ReportPriority.values.map((p) => DropdownMenuItem(value: p, child: Text(p.name))).toList(),
+                      onChanged: (val) {
+                        if (val != null) setModalState(() => priority = val);
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: TextEditingController(text: description)..selection = TextSelection.collapsed(offset: description.length),
+                      style: const TextStyle(color: Colors.white),
+                      maxLines: 3,
+                      decoration: const InputDecoration(labelText: 'Description', labelStyle: TextStyle(color: Colors.grey)),
+                      onChanged: (val) => description = val,
+                    ),
+                    const SizedBox(height: 16),
+                    OutlinedButton.icon(
+                      onPressed: () {},
+                      icon: const Icon(Icons.camera_alt, color: Colors.tealAccent),
+                      label: const Text('Attach Photos (Coming Soon)', style: TextStyle(color: Colors.tealAccent)),
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.tealAccent, foregroundColor: Colors.black, padding: const EdgeInsets.symmetric(vertical: 16)),
+                      onPressed: () {
+                        if (title.isEmpty) return;
+                        state.updateReport(
+                          report.id,
+                          title: title,
+                          description: description,
+                          category: category,
+                          priority: priority,
+                          siteId: (category == 'Site Issue' && selectedSiteId != null) 
+                              ? selectedSiteId! 
+                              : (state.allSimulatableSites.isNotEmpty ? state.allSimulatableSites.first.id : 'unknown'),
+                        );
+                        Navigator.pop(ctx);
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Report updated successfully!'), backgroundColor: Colors.green));
+                      },
+                      child: const Text('SAVE CHANGES', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                    const SizedBox(height: 20),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showReportDetails(BuildContext context, Report report, TrackerState state) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF1E1E26),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        return Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(child: Text(report.title, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold))),
+                  _buildStatusBadge(report.status),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text('Category: ${report.category} | Priority: ${report.priority.name}', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+              const SizedBox(height: 4),
+              Text('Submitted: ${DateFormat('MMM dd, yyyy - hh:mm a').format(report.submittedAt)}', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+              const Divider(color: Color(0xFF2D2D38), height: 32),
+              const Text('Description', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Text(report.description.isEmpty ? 'No description provided.' : report.description, style: const TextStyle(color: Colors.grey, fontSize: 14)),
+              const Divider(color: Color(0xFF2D2D38), height: 32),
+              const Text('Admin Comments', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Text(report.adminComments ?? 'No comments from admin yet.', style: const TextStyle(color: Colors.orangeAccent, fontSize: 14, fontStyle: FontStyle.italic)),
+              const SizedBox(height: 32),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2D2D38), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 16)),
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('CLOSE'),
+              ),
+              const SizedBox(height: 20),
+            ],
+          ),
+        );
+      },
     );
   }
 

@@ -10,6 +10,7 @@ import 'geofence_model.dart';
 import 'map_service.dart';
 import 'live_map_view.dart' show LiveMapView, MapStyle, hexToColor;
 import 'worker_location.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'dart:math';
 
 Color _hexToColor(String hex) {
@@ -52,6 +53,12 @@ class _DashboardViewState extends State<DashboardView> {
   final ScrollController _siteWiseScrollCtrl = ScrollController();
   final ScrollController _overtimeScrollCtrl = ScrollController();
 
+  // Search controllers for Workers and Sites tabs
+  final TextEditingController _workerSearchCtrl = TextEditingController();
+  final TextEditingController _siteSearchCtrl = TextEditingController();
+  String _workerSearch = '';
+  String _siteSearch = '';
+
   final List<String> _tabs = [
     'Dashboard',
     'Live Map',
@@ -72,6 +79,8 @@ class _DashboardViewState extends State<DashboardView> {
     _dailyScrollCtrl.dispose();
     _siteWiseScrollCtrl.dispose();
     _overtimeScrollCtrl.dispose();
+    _workerSearchCtrl.dispose();
+    _siteSearchCtrl.dispose();
     super.dispose();
   }
 
@@ -159,10 +168,18 @@ class _DashboardViewState extends State<DashboardView> {
                   case 10: icon = Icons.person_outline; break;
                   default: icon = Icons.circle;
                 }
+                String tabTitle = _tabs[index];
+                if (index == 6) { // Reports tab
+                  int openReportsCount = state.allReports.where((r) => r.status == ReportStatus.Open).length;
+                  if (openReportsCount > 0) {
+                    tabTitle = 'Reports ($openReportsCount)';
+                  }
+                }
+                
                 return ListTile(
                   leading: Icon(icon, color: isActive ? Colors.tealAccent : Colors.grey, size: 20),
                   title: Text(
-                    _tabs[index],
+                    tabTitle,
                     style: TextStyle(color: isActive ? Colors.white : Colors.grey, fontSize: 13, fontWeight: isActive ? FontWeight.bold : FontWeight.normal),
                   ),
                   selected: isActive,
@@ -296,10 +313,389 @@ class _DashboardViewState extends State<DashboardView> {
       case 3: return _buildSiteManagement(context, state);
       case 4: return _buildPendingVisits(context, state);
       case 5: return _buildReports(context, state); // Attendance
-      case 6: return _buildReports(context, state); // Reports
+      case 6: return _buildFieldReports(context, state); // Reports
       case 7: return _buildAdvancedScheduler(context, state); // Schedule
       default: return _buildPlaceholderTab(_tabs[_activeTab]);
     }
+  }
+
+  String _reportFilterStatus = 'All';
+
+  Widget _buildFieldReports(BuildContext context, TrackerState state) {
+    int openCount = state.allReports.where((r) => r.status == ReportStatus.Open).length;
+    int progressCount = state.allReports.where((r) => r.status == ReportStatus.InProgress).length;
+    int resolvedCount = state.allReports.where((r) => r.status == ReportStatus.Resolved).length;
+    int closedCount = state.allReports.where((r) => r.status == ReportStatus.Closed).length;
+
+    List<Report> displayReports = state.allReports;
+    if (_reportFilterStatus != 'All') {
+      if (_reportFilterStatus == 'High Priority') {
+        displayReports = displayReports.where((r) => r.priority == ReportPriority.High).toList();
+      } else if (_reportFilterStatus == 'Today') {
+        displayReports = displayReports.where((r) => r.submittedAt.day == DateTime.now().day && r.submittedAt.month == DateTime.now().month && r.submittedAt.year == DateTime.now().year).toList();
+      } else {
+        displayReports = displayReports.where((r) => r.status.name == _reportFilterStatus).toList();
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Top Dashboard Cards
+        LayoutBuilder(
+          builder: (context, constraints) {
+            if (constraints.maxWidth < 600) {
+              return GridView.count(
+                crossAxisCount: 2,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                mainAxisSpacing: 16,
+                crossAxisSpacing: 16,
+                childAspectRatio: 1.3,
+                children: [
+                  _buildReportMetricCard('Open Reports', '$openCount', Icons.assignment_late, Colors.redAccent),
+                  _buildReportMetricCard('In Progress', '$progressCount', Icons.sync, Colors.orangeAccent),
+                  _buildReportMetricCard('Resolved', '$resolvedCount', Icons.check_circle, Colors.greenAccent),
+                  _buildReportMetricCard('Closed', '$closedCount', Icons.archive, Colors.grey),
+                ],
+              );
+            }
+            return Row(
+              children: [
+                Expanded(child: _buildReportMetricCard('Open Reports', '$openCount', Icons.assignment_late, Colors.redAccent)),
+                const SizedBox(width: 16),
+                Expanded(child: _buildReportMetricCard('In Progress', '$progressCount', Icons.sync, Colors.orangeAccent)),
+                const SizedBox(width: 16),
+                Expanded(child: _buildReportMetricCard('Resolved', '$resolvedCount', Icons.check_circle, Colors.greenAccent)),
+                const SizedBox(width: 16),
+                Expanded(child: _buildReportMetricCard('Closed', '$closedCount', Icons.archive, Colors.grey)),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 24),
+        
+        // Filter Bar
+        Row(
+          children: [
+            // Search Bar
+            Expanded(
+              flex: 2,
+              child: Container(
+                decoration: BoxDecoration(color: const Color(0xFF1E1E26), borderRadius: BorderRadius.circular(8)),
+                child: const TextField(
+                  style: TextStyle(color: Colors.white, fontSize: 13),
+                  decoration: InputDecoration(
+                    prefixIcon: Icon(Icons.search, color: Colors.grey, size: 20),
+                    hintText: 'Search reports...',
+                    hintStyle: TextStyle(color: Colors.grey),
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.symmetric(vertical: 14),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 16),
+            // Filter Chips
+            Expanded(
+              flex: 3,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: ['All', 'Today', 'Open', 'High Priority', 'Resolved'].map((filter) {
+                    final isSelected = _reportFilterStatus == filter;
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 8.0),
+                      child: FilterChip(
+                        label: Text(filter, style: TextStyle(color: isSelected ? Colors.black : Colors.white, fontSize: 12)),
+                        selected: isSelected,
+                        selectedColor: Colors.tealAccent,
+                        backgroundColor: const Color(0xFF1E1E26),
+                        onSelected: (val) {
+                          setState(() {
+                            _reportFilterStatus = filter;
+                          });
+                        },
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+
+        // List
+        Expanded(
+          child: Container(
+            decoration: BoxDecoration(color: const Color(0xFF1E1E26), borderRadius: BorderRadius.circular(16)),
+            child: displayReports.isEmpty
+                ? const Center(child: Text('No reports match the filter.', style: TextStyle(color: Colors.grey)))
+                : ListView.separated(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: displayReports.length,
+                    separatorBuilder: (_, __) => const Divider(color: Color(0xFF2D2D38)),
+                    itemBuilder: (context, index) {
+                      final report = displayReports[index];
+                      final worker = state.workers.firstWhere((w) => w.id == report.workerId, orElse: () => state.workers.first);
+                      final site = state.sites.firstWhere((s) => s.id == report.siteId, orElse: () => state.sites.first);
+
+                      return ListTile(
+                        onTap: () => _showReportDetailsAdmin(context, report, worker, site, state),
+                        leading: _buildReportPriorityBadge(report.priority),
+                        title: Text(report.title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                        subtitle: Padding(
+                          padding: const EdgeInsets.only(top: 4.0),
+                          child: Text('${worker.name} @ ${site.name} • ${DateFormat('MMM dd, yyyy').format(report.submittedAt)}', style: const TextStyle(color: Colors.grey, fontSize: 11)),
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _buildReportStatusBadge(report.status),
+                            const SizedBox(width: 16),
+                            const Icon(Icons.chevron_right, color: Colors.grey),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildReportMetricCard(String title, String val, IconData icon, Color color) {
+    return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E1E26),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withOpacity(0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(title, style: const TextStyle(color: Colors.grey, fontSize: 13, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(icon, color: color, size: 24),
+                const Spacer(),
+                Text(val, style: TextStyle(color: color, fontSize: 28, fontWeight: FontWeight.bold)),
+              ],
+            ),
+          ],
+        ),
+      );
+  }
+
+  void _showReportDetailsAdmin(BuildContext context, Report report, Worker worker, Site site, TrackerState state) {
+    ReportStatus currentStatus = report.status;
+    ReportPriority currentPriority = report.priority;
+    String adminComments = report.adminComments ?? '';
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return Dialog(
+              backgroundColor: const Color(0xFF1E1E26),
+              insetPadding: const EdgeInsets.all(16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              child: Container(
+                width: 600,
+                padding: const EdgeInsets.all(24),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(report.title, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 8),
+                      Text('${report.category} • ${DateFormat('MMM dd, yyyy - hh:mm a').format(report.submittedAt)}', style: const TextStyle(color: Colors.tealAccent, fontSize: 13)),
+                      const SizedBox(height: 24),
+                      Row(
+                        children: [
+                          const CircleAvatar(radius: 20, backgroundColor: Colors.blueAccent, child: Icon(Icons.person, color: Colors.white)),
+                          const SizedBox(width: 12),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(worker.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                              Text('Reported from: ${site.name}', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                            ],
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
+                      const Text('Description', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 8),
+                      Text(report.description, style: const TextStyle(color: Colors.grey, fontSize: 14)),
+                      if (report.category == 'Site Issue') ...[
+                        const SizedBox(height: 12),
+                        InkWell(
+                          onTap: () {
+                            _showSiteDetailsModal(context, site);
+                          },
+                          child: const Text('View Site', style: TextStyle(color: Colors.blueAccent, decoration: TextDecoration.underline, fontSize: 13, fontWeight: FontWeight.bold)),
+                        ),
+                      ],
+                      const SizedBox(height: 32),
+                      const Divider(color: Color(0xFF2D2D38)),
+                      const SizedBox(height: 24),
+                      const Text('Manage Report', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 24),
+                      const Text('Status', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<ReportStatus>(
+                        value: currentStatus,
+                        dropdownColor: const Color(0xFF2D2D38),
+                        style: const TextStyle(color: Colors.white),
+                        decoration: const InputDecoration(border: OutlineInputBorder()),
+                        items: ReportStatus.values.map((s) => DropdownMenuItem(value: s, child: Text(s.name))).toList(),
+                        onChanged: (val) {
+                          if (val != null) setDialogState(() => currentStatus = val);
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      const Text('Admin Comments', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                      const SizedBox(height: 8),
+                      TextField(
+                        style: const TextStyle(color: Colors.white),
+                        maxLines: 4,
+                        decoration: const InputDecoration(
+                          hintText: 'Add internal notes or updates...',
+                          hintStyle: TextStyle(color: Colors.grey),
+                          border: OutlineInputBorder(),
+                        ),
+                        controller: TextEditingController(text: adminComments)..selection = TextSelection.collapsed(offset: adminComments.length),
+                        onChanged: (val) => adminComments = val,
+                      ),
+                      const SizedBox(height: 32),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+                              onPressed: () => Navigator.pop(ctx),
+                              child: const Text('Cancel', style: TextStyle(color: Colors.white)),
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: ElevatedButton(
+                              style: ElevatedButton.styleFrom(backgroundColor: Colors.tealAccent, foregroundColor: Colors.black, padding: const EdgeInsets.symmetric(vertical: 16)),
+                              onPressed: () {
+                                state.updateReport(report.id, status: currentStatus, priority: currentPriority, adminComments: adminComments);
+                                Navigator.pop(ctx);
+                              },
+                              child: const Text('Save', style: TextStyle(fontWeight: FontWeight.bold)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showSiteDetailsModal(BuildContext context, Site site) {
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return Dialog(
+          backgroundColor: const Color(0xFF1E1E26),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          child: Container(
+            width: 400,
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(site.name, style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Text('Code: ${site.code}', style: const TextStyle(color: Colors.grey, fontSize: 13)),
+                const SizedBox(height: 16),
+                const Text('Category', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                Text(site.category.name, style: const TextStyle(color: Colors.white, fontSize: 14)),
+                const SizedBox(height: 12),
+                const Text('Location / Coordinates', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                Text('${site.latitude.toStringAsFixed(5)}, ${site.longitude.toStringAsFixed(5)}', style: const TextStyle(color: Colors.white, fontSize: 14)),
+                const SizedBox(height: 12),
+                const Text('Address', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                Text(site.address, style: const TextStyle(color: Colors.white, fontSize: 14)),
+                const SizedBox(height: 32),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.tealAccent, foregroundColor: Colors.black, padding: const EdgeInsets.symmetric(vertical: 16)),
+                    icon: const Icon(Icons.map),
+                    label: const Text('View Location on Maps', style: TextStyle(fontWeight: FontWeight.bold)),
+                    onPressed: () async {
+                      final geoUri = Uri.parse('geo:${site.latitude},${site.longitude}?q=${site.latitude},${site.longitude}');
+                      final webUri = Uri.parse('https://www.google.com/maps/search/?api=1&query=${site.latitude},${site.longitude}');
+                      try {
+                        if (!await launchUrl(geoUri, mode: LaunchMode.externalApplication)) {
+                          await launchUrl(webUri, mode: LaunchMode.externalApplication);
+                        }
+                      } catch (e) {
+                        try {
+                           await launchUrl(webUri, mode: LaunchMode.externalApplication);
+                        } catch (e2) {
+                           if (context.mounted) {
+                             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not open map: $e'), backgroundColor: Colors.red));
+                           }
+                        }
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildReportStatusBadge(ReportStatus status) {
+    Color color;
+    switch (status) {
+      case ReportStatus.Open: color = Colors.blueAccent; break;
+      case ReportStatus.InProgress: color = Colors.orangeAccent; break;
+      case ReportStatus.Resolved: color = Colors.greenAccent; break;
+      case ReportStatus.Closed: color = Colors.grey; break;
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+      child: Text(status.name, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold)),
+    );
+  }
+
+  Widget _buildReportPriorityBadge(ReportPriority priority) {
+    Color color;
+    switch (priority) {
+      case ReportPriority.Low: color = Colors.greenAccent; break;
+      case ReportPriority.Medium: color = Colors.orangeAccent; break;
+      case ReportPriority.High: color = Colors.redAccent; break;
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+      child: Text(priority.name.toUpperCase(), style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
+    );
   }
 
   Widget _buildPlaceholderTab(String title) {
@@ -979,19 +1375,23 @@ class _DashboardViewState extends State<DashboardView> {
       );
     }
 
-    return FlutterMap(
-      mapController: _dashboardMapController,
-      options: MapOptions(
-        initialCenter: LatLng(state.currentLat, state.currentLng),
-        initialZoom: 12,
-        maxZoom: 22,
+    return Container(
+      color: Colors.black, // Explicit black background for empty spaces
+      child: FlutterMap(
+        mapController: _dashboardMapController,
+        options: MapOptions(
+          initialCenter: LatLng(state.currentLat, state.currentLng),
+          initialZoom: 12,
+          maxZoom: 22,
+          backgroundColor: Colors.black,
+        ),
+        children: [
+          tileLayer,
+          if (polygons.isNotEmpty) PolygonLayer(polygons: polygons),
+          if (circles.isNotEmpty) CircleLayer(circles: circles),
+          if (markers.isNotEmpty) MarkerLayer(markers: markers),
+        ],
       ),
-      children: [
-        tileLayer,
-        if (polygons.isNotEmpty) PolygonLayer(polygons: polygons),
-        if (circles.isNotEmpty) CircleLayer(circles: circles),
-        if (markers.isNotEmpty) MarkerLayer(markers: markers),
-      ],
     );
   }
 
@@ -1273,6 +1673,14 @@ class _DashboardViewState extends State<DashboardView> {
 
   // --- TAB 1: SITE MANAGEMENT ---
   Widget _buildSiteManagement(BuildContext context, TrackerState state) {
+    final filteredSites = _siteSearch.isEmpty
+        ? state.sites
+        : state.sites.where((s) =>
+            s.name.toLowerCase().contains(_siteSearch.toLowerCase()) ||
+            s.code.toLowerCase().contains(_siteSearch.toLowerCase()) ||
+            s.address.toLowerCase().contains(_siteSearch.toLowerCase())
+          ).toList();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1295,12 +1703,48 @@ class _DashboardViewState extends State<DashboardView> {
               )
           ],
         ),
+        const SizedBox(height: 12),
+        // Search bar for sites
+        TextField(
+          controller: _siteSearchCtrl,
+          onChanged: (v) => setState(() => _siteSearch = v),
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: 'Search site name or code...',
+            hintStyle: const TextStyle(color: Colors.grey),
+            prefixIcon: const Icon(Icons.search, color: Colors.grey),
+            suffixIcon: _siteSearch.isNotEmpty
+                ? IconButton(
+                    icon: const Icon(Icons.clear, color: Colors.grey),
+                    onPressed: () {
+                      _siteSearchCtrl.clear();
+                      setState(() => _siteSearch = '');
+                    },
+                  )
+                : null,
+            filled: true,
+            fillColor: const Color(0xFF1E1E26),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: Colors.grey.withOpacity(0.2)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Color(0xFF00BFA5)),
+            ),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          ),
+        ),
         const SizedBox(height: 16),
         Expanded(
           child: ListView.builder(
-            itemCount: state.sites.length,
+            itemCount: filteredSites.length,
             itemBuilder: (context, index) {
-              final s = state.sites[index];
+              final s = filteredSites[index];
               return Card(
                 color: const Color(0xFF1E1E26),
                 margin: const EdgeInsets.only(bottom: 12),
@@ -1442,6 +1886,14 @@ class _DashboardViewState extends State<DashboardView> {
       return daysId <= 90 || daysPass <= 180 || daysLab <= 90;
     }).length;
 
+    final filteredWorkers = _workerSearch.isEmpty
+        ? state.workers
+        : state.workers.where((w) =>
+            w.name.toLowerCase().contains(_workerSearch.toLowerCase()) ||
+            w.employeeId.toLowerCase().contains(_workerSearch.toLowerCase()) ||
+            w.designation.toLowerCase().contains(_workerSearch.toLowerCase())
+          ).toList();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1466,6 +1918,42 @@ class _DashboardViewState extends State<DashboardView> {
           ],
         ),
         const SizedBox(height: 12),
+        // Search bar for workers
+        TextField(
+          controller: _workerSearchCtrl,
+          onChanged: (v) => setState(() => _workerSearch = v),
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: 'Search worker name or employee ID...',
+            hintStyle: const TextStyle(color: Colors.grey),
+            prefixIcon: const Icon(Icons.search, color: Colors.grey),
+            suffixIcon: _workerSearch.isNotEmpty
+                ? IconButton(
+                    icon: const Icon(Icons.clear, color: Colors.grey),
+                    onPressed: () {
+                      _workerSearchCtrl.clear();
+                      setState(() => _workerSearch = '');
+                    },
+                  )
+                : null,
+            filled: true,
+            fillColor: const Color(0xFF1E1E26),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: Colors.grey.withOpacity(0.2)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Color(0xFF00BFA5)),
+            ),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          ),
+        ),
+        const SizedBox(height: 12),
         if (expCount > 0)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -1484,9 +1972,10 @@ class _DashboardViewState extends State<DashboardView> {
         const SizedBox(height: 16),
         Expanded(
           child: ListView.builder(
-            itemCount: state.workers.length,
+            itemCount: filteredWorkers.length,
             itemBuilder: (context, index) {
-              final w = state.workers[index];
+              final w = filteredWorkers[index];
+
               final daysId = w.emiratesIdExpiry.difference(state.simulatedTime).inDays;
               final daysPass = w.passportExpiry.difference(state.simulatedTime).inDays;
               final daysLab = w.labourCardExpiry.difference(state.simulatedTime).inDays;
@@ -3604,14 +4093,17 @@ class _AddSiteDialogState extends State<_AddSiteDialog> {
       borderRadius: const BorderRadius.only(topRight: Radius.circular(20)),
       child: Stack(
         children: [
-          FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(
-              initialCenter: LatLng(trackerState.currentLat, trackerState.currentLng),
-              initialZoom: 13,
-              maxZoom: 22,
-              onTap: _onMapTap,
-            ),
+          Container(
+            color: Colors.black, // Explicit black background for empty spaces
+            child: FlutterMap(
+              mapController: _mapController,
+              options: MapOptions(
+                initialCenter: LatLng(trackerState.currentLat, trackerState.currentLng),
+                initialZoom: 13,
+                maxZoom: 22,
+                backgroundColor: Colors.black, // Prevents blue tint on tile load
+                onTap: _onMapTap,
+              ),
             children: [
               // Tile layer (switches by style)
               tileLayer,
@@ -3709,6 +4201,7 @@ class _AddSiteDialogState extends State<_AddSiteDialog> {
                 ]),
             ],
           ),
+          ),
 
           // ── Top Overlays (Search, Instructions, Styles) ─────────────────────
           Positioned(
@@ -3799,6 +4292,138 @@ class _AddSiteDialogState extends State<_AddSiteDialog> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
+                // Geofence Settings Button (visible in fullscreen mode)
+                FloatingActionButton.small(
+                  heroTag: 'geofence_settings_fab',
+                  backgroundColor: fenceColor.withOpacity(0.9),
+                  onPressed: () {
+                    showModalBottomSheet(
+                      context: context,
+                      backgroundColor: const Color(0xFF1E1E26),
+                      shape: const RoundedRectangleBorder(
+                        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                      ),
+                      builder: (ctx) => StatefulBuilder(
+                        builder: (ctx, setModalState) => Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('⚙️ Geofence Settings', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 16),
+                              // Shape selector
+                              const Text('Shape Type', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        setState(() => _fenceShape = GeofenceShape.circle);
+                                        setModalState(() {});
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(vertical: 10),
+                                        decoration: BoxDecoration(
+                                          color: _fenceShape == GeofenceShape.circle ? fenceColor.withOpacity(0.2) : const Color(0xFF13131A),
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(color: _fenceShape == GeofenceShape.circle ? fenceColor : Colors.grey.withOpacity(0.3)),
+                                        ),
+                                        child: Column(
+                                          children: [
+                                            Icon(Icons.radio_button_checked, color: _fenceShape == GeofenceShape.circle ? fenceColor : Colors.grey, size: 20),
+                                            const SizedBox(height: 4),
+                                            Text('Circle', style: TextStyle(color: _fenceShape == GeofenceShape.circle ? fenceColor : Colors.grey, fontSize: 11)),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        setState(() => _fenceShape = GeofenceShape.polygon);
+                                        setModalState(() {});
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(vertical: 10),
+                                        decoration: BoxDecoration(
+                                          color: _fenceShape == GeofenceShape.polygon ? fenceColor.withOpacity(0.2) : const Color(0xFF13131A),
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(color: _fenceShape == GeofenceShape.polygon ? fenceColor : Colors.grey.withOpacity(0.3)),
+                                        ),
+                                        child: Column(
+                                          children: [
+                                            Icon(Icons.pentagon_outlined, color: _fenceShape == GeofenceShape.polygon ? fenceColor : Colors.grey, size: 20),
+                                            const SizedBox(height: 4),
+                                            Text('Polygon', style: TextStyle(color: _fenceShape == GeofenceShape.polygon ? fenceColor : Colors.grey, fontSize: 11)),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (_fenceShape == GeofenceShape.circle) ...[
+                                const SizedBox(height: 16),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    const Text('Radius', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                                    Text('${_circleRadius.toInt()}m', style: TextStyle(color: fenceColor, fontSize: 12, fontWeight: FontWeight.bold)),
+                                  ],
+                                ),
+                                Slider(
+                                  value: _circleRadius,
+                                  min: 20,
+                                  max: 1000,
+                                  divisions: 98,
+                                  activeColor: fenceColor,
+                                  onChanged: (v) {
+                                    setState(() => _circleRadius = v);
+                                    setModalState(() {});
+                                  },
+                                ),
+                              ],
+                              const SizedBox(height: 12),
+                              const Text('Fence Color', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                              const SizedBox(height: 8),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: _colorOptions.map((c) {
+                                  final col = _hexToColor(c);
+                                  final isSelected = c == _fenceColor;
+                                  return GestureDetector(
+                                    onTap: () {
+                                      setState(() => _fenceColor = c);
+                                      setModalState(() {});
+                                    },
+                                    child: Container(
+                                      width: 30,
+                                      height: 30,
+                                      decoration: BoxDecoration(
+                                        color: col,
+                                        shape: BoxShape.circle,
+                                        border: Border.all(color: isSelected ? Colors.white : Colors.transparent, width: 3),
+                                        boxShadow: isSelected ? [BoxShadow(color: col.withOpacity(0.6), blurRadius: 8, spreadRadius: 2)] : null,
+                                      ),
+                                    ),
+                                  );
+                                }).toList(),
+                              ),
+                              const SizedBox(height: 16),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Icon(Icons.tune, color: Colors.white, size: 18),
+                ),
+                const SizedBox(height: 8),
                 // Fullscreen toggle
                 FloatingActionButton.small(
                   heroTag: 'fullscreen_fab',

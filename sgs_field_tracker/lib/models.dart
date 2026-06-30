@@ -8,6 +8,115 @@ enum SubCategory { Indoor, Outdoor, WF } // WF: Water Feature
 enum JobType { Permanent, Remote }
 enum JobFrequency { Daily, WeeklyThrice, WeeklyTwice, WeeklyOnce, BiWeekly }
 enum GeofenceType { Circular, Polygon }
+enum ReportStatus { Open, InProgress, Resolved, Closed }
+enum ReportPriority { Low, Medium, High }
+
+class Report {
+  final String id;
+  final String workerId;
+  final String siteId;
+  final String title;
+  final String description;
+  final String category; // Stored as string from the dropdown list
+  final ReportPriority priority;
+  final ReportStatus status;
+  final DateTime submittedAt;
+  final double latitude;
+  final double longitude;
+  final List<String> photos; // Placeholder paths
+  final String? voiceNotePath;
+  final String? adminComments;
+  final String? assignedAdminId;
+
+  Report({
+    required this.id,
+    required this.workerId,
+    required this.siteId,
+    required this.title,
+    required this.description,
+    required this.category,
+    required this.priority,
+    this.status = ReportStatus.Open,
+    required this.submittedAt,
+    required this.latitude,
+    required this.longitude,
+    this.photos = const [],
+    this.voiceNotePath,
+    this.adminComments,
+    this.assignedAdminId,
+  });
+
+  Report copyWith({
+    String? title,
+    String? description,
+    String? category,
+    String? siteId,
+    ReportPriority? priority,
+    ReportStatus? status,
+    List<String>? photos,
+    String? voiceNotePath,
+    String? adminComments,
+    String? assignedAdminId,
+  }) {
+    return Report(
+      id: id,
+      workerId: workerId,
+      siteId: siteId ?? this.siteId,
+      title: title ?? this.title,
+      description: description ?? this.description,
+      category: category ?? this.category,
+      priority: priority ?? this.priority,
+      status: status ?? this.status,
+      submittedAt: submittedAt,
+      latitude: latitude,
+      longitude: longitude,
+      photos: photos ?? this.photos,
+      voiceNotePath: voiceNotePath ?? this.voiceNotePath,
+      adminComments: adminComments ?? this.adminComments,
+      assignedAdminId: assignedAdminId ?? this.assignedAdminId,
+    );
+  }
+
+  factory Report.fromJson(Map<String, dynamic> json) {
+    return Report(
+      id: json['id'] ?? '',
+      workerId: json['workerId'] ?? '',
+      siteId: json['siteId'] ?? '',
+      title: json['title'] ?? '',
+      description: json['description'] ?? '',
+      category: json['category'] ?? '',
+      priority: ReportPriority.values.firstWhere((e) => e.name == json['priority'], orElse: () => ReportPriority.Medium),
+      status: ReportStatus.values.firstWhere((e) => e.name == json['status'], orElse: () => ReportStatus.Open),
+      submittedAt: json['submittedAt'] != null ? DateTime.parse(json['submittedAt']) : DateTime.now(),
+      latitude: (json['latitude'] ?? 0.0) as double,
+      longitude: (json['longitude'] ?? 0.0) as double,
+      photos: (json['photos'] as List<dynamic>?)?.map((e) => e as String).toList() ?? [],
+      voiceNotePath: json['voiceNotePath'],
+      adminComments: json['adminComments'],
+      assignedAdminId: json['assignedAdminId'],
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'workerId': workerId,
+      'siteId': siteId,
+      'title': title,
+      'description': description,
+      'category': category,
+      'priority': priority.name,
+      'status': status.name,
+      'submittedAt': submittedAt.toIso8601String(),
+      'latitude': latitude,
+      'longitude': longitude,
+      'photos': photos,
+      'voiceNotePath': voiceNotePath,
+      'adminComments': adminComments,
+      'assignedAdminId': assignedAdminId,
+    };
+  }
+}
 
 class Site {
   final String id;

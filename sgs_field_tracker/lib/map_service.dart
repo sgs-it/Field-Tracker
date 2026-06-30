@@ -15,7 +15,7 @@ String get backendHost {
     return 'localhost:8080';
   }
   if (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS) {
-    return '192.168.0.127:8080';
+    return '192.168.1.62:8080';
   }
   return 'localhost:8080';
 }

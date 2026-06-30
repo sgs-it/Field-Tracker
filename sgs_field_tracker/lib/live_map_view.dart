@@ -185,12 +185,15 @@ class _LiveMapViewState extends State<LiveMapView> {
         child: Stack(
           children: [
             // ── FlutterMap ────────────────────────────────────────────────────
-            FlutterMap(
-              mapController: _mapController,
-              options: MapOptions(
-                initialCenter: LatLng(trackerState.currentLat, trackerState.currentLng),
-                initialZoom: 12,
-                maxZoom: 22, // Allows satellite tiles to reach full native resolution
+            Container(
+              color: Colors.black, // Explicit black background for empty spaces
+              child: FlutterMap(
+                mapController: _mapController,
+                options: MapOptions(
+                  initialCenter: LatLng(trackerState.currentLat, trackerState.currentLng),
+                  initialZoom: 12,
+                  maxZoom: 22,
+                  backgroundColor: Colors.black, // Prevents blue tint on tile load
                 onTap: (pos, latlng) {
                   if (_isDrawingGeofence) {
                     _onMapTap(pos, latlng);
@@ -259,7 +262,7 @@ class _LiveMapViewState extends State<LiveMapView> {
                 _buildWorkerMarkerLayer(mapSvc, trackerState),
               ],
             ),
-
+            ),
             // ── Top bar: Search & Chips ────────────────────────────────
             Positioned(
               top: 12,

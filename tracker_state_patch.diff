@@ -1,0 +1,1397 @@
+diff --git a/sgs_field_tracker/lib/tracker_state.dart b/sgs_field_tracker/lib/tracker_state.dart
+index 12d24d9..36b17a1 100644
+--- a/sgs_field_tracker/lib/tracker_state.dart
++++ b/sgs_field_tracker/lib/tracker_state.dart
+@@ -1,7 +1,7 @@
+ import 'dart:async';
+ import 'dart:convert';
+ import 'dart:math';
+-import 'dart:html' as html;
++import 'package:shared_preferences/shared_preferences.dart';
+ import 'package:flutter/material.dart';
+ import 'package:intl/intl.dart';
+ import 'package:geolocator/geolocator.dart';
+@@ -9,6 +9,7 @@ import 'package:latlong2/latlong.dart';
+ import 'package:http/http.dart' as http;
+ import 'package:web_socket_channel/web_socket_channel.dart';
+ import 'geofence_model.dart';
++import 'map_service.dart' show kServerBaseUrl, kWsBaseUrl;
+ import 'models.dart';
+ 
+ class TrackerState extends ChangeNotifier {
+@@ -19,6 +20,7 @@ class TrackerState extends ChangeNotifier {
+   List<AttendanceRecord> _attendanceRecords = [];
+   List<TamperAlert> _tamperAlerts = [];
+   List<HeartbeatLog> _heartbeatLogs = [];
++  List<AppNotification> _notifications = [];
+ 
+   // Active user selections
+   String _activeRoleId = 'Admin'; // Admin, Engineer, Supervisor, Worker
+@@ -30,6 +32,10 @@ class TrackerState extends ChangeNotifier {
+   bool _isFakeGpsEnabled = false;
+   bool _isInternetEnabled = true;
+   bool _morningAlarmTriggered = false;
++  bool _morningAlarmEnabled = true;
++  bool _endShiftAlarmEnabled = true;
++  bool _notificationsEnabled = true;
++  bool _endShiftAlarmTriggered = false;
+ 
+   // Live GPS tracking and WebSocket client state
+   WebSocketChannel? _workerWsChannel;
+@@ -85,8 +91,27 @@ class TrackerState extends ChangeNotifier {
+   bool get isFakeGpsEnabled => _isFakeGpsEnabled;
+   bool get isInternetEnabled => _isInternetEnabled;
+   bool get morningAlarmTriggered => _morningAlarmTriggered;
++  bool get morningAlarmEnabled => _morningAlarmEnabled;
++  bool get endShiftAlarmEnabled => _endShiftAlarmEnabled;
++  bool get notificationsEnabled => _notificationsEnabled;
++  bool get endShiftAlarmTriggered => _endShiftAlarmTriggered;
+   DateTime get selectedDate => _selectedDate;
+ 
++  List<AppNotification> get allNotifications => _notifications;
++
++  List<AppNotification> get activeNotifications {
++    if (_activeRoleId == 'Worker') {
++      return _notifications
++          .where((n) => !n.isRead && n.targetRole == 'Worker' && (n.targetWorkerId == null || n.targetWorkerId == _selectedWorkerId))
++          .toList();
++    } else if (_activeRoleId == 'Admin' || _activeRoleId == 'Supervisor') {
++      return _notifications
++          .where((n) => !n.isRead && (n.targetRole == 'Admin' || n.targetRole == 'Supervisor'))
++          .toList();
++    }
++    return [];
++  }
++
+   String get companyShiftStart => _companyShiftStart;
+   int get companyShiftHours => _companyShiftHours;
+   int get companyBreakMinutes => _companyBreakMinutes;
+@@ -155,10 +180,24 @@ class TrackerState extends ChangeNotifier {
+   }
+ 
+   Timer? _geofencePollTimer;
++  bool _isInitialized = false;
++  bool get isInitialized => _isInitialized;
+ 
+   TrackerState() {
+-    _loadWorkersFromStorage();
++    _init();
++  }
++
++  Future<void> _init() async {
++    await _loadSettingsFromStorage();
++    await _loadWorkersFromStorage();
++    await _loadGeofencesFromStorage();
++    await _loadAssignmentsFromStorage();
++    await _loadAttendanceRecordsFromStorage();
++    await _loadTamperAlertsFromStorage();
++    await _loadNotificationsFromStorage();
+     _seedInitialData();
++    _isInitialized = true;
++    notifyListeners();
+     fetchGeofencesFromBackend();
+     _initializeCurrentLocation();
+     _geofencePollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+@@ -166,9 +205,10 @@ class TrackerState extends ChangeNotifier {
+     });
+   }
+ 
+-  void _loadWorkersFromStorage() {
++  Future<void> _loadWorkersFromStorage() async {
+     try {
+-      final jsonStr = html.window.localStorage['sgs_field_tracker_workers'];
++      final prefs = await SharedPreferences.getInstance();
++      final jsonStr = prefs.getString('sgs_field_tracker_workers');
+       if (jsonStr != null && jsonStr.isNotEmpty) {
+         final List<dynamic> list = jsonDecode(jsonStr);
+         _workers = list.map((e) => Worker.fromJson(e as Map<String, dynamic>)).toList();
+@@ -179,7 +219,7 @@ class TrackerState extends ChangeNotifier {
+       debugPrint('Error loading workers from local storage: $e');
+       _workers = [];
+     }
+-    
++
+     if (_workers.isNotEmpty) {
+       _selectedWorkerId = _workers.first.id;
+     } else {
+@@ -187,152 +227,347 @@ class TrackerState extends ChangeNotifier {
+     }
+   }
+ 
+-  void _saveWorkersToStorage() {
++  Future<void> _saveWorkersToStorage() async {
+     try {
++      final prefs = await SharedPreferences.getInstance();
+       final jsonStr = jsonEncode(_workers.map((w) => w.toJson()).toList());
+-      html.window.localStorage['sgs_field_tracker_workers'] = jsonStr;
++      await prefs.setString('sgs_field_tracker_workers', jsonStr);
+     } catch (e) {
+       debugPrint('Error saving workers to local storage: $e');
+     }
+   }
+ 
+-  void _seedInitialData() {
+-    // 1. Seed Sites (including accommodation)
+-    _sites = [];
++  Future<void> _loadSettingsFromStorage() async {
++    try {
++      final prefs = await SharedPreferences.getInstance();
++      _morningAlarmEnabled = prefs.getBool('sgs_morning_alarm_enabled') ?? true;
++      _endShiftAlarmEnabled = prefs.getBool('sgs_end_shift_alarm_enabled') ?? true;
++      _notificationsEnabled = prefs.getBool('sgs_notifications_enabled') ?? true;
++    } catch (e) {
++      debugPrint('Error loading settings from local storage: $e');
++    }
++  }
+ 
+-    DateTime today = DateTime(2026, 6, 17);
+-    _assignments = [];
++  Future<void> _saveSettingsToStorage() async {
++    try {
++      final prefs = await SharedPreferences.getInstance();
++      await prefs.setBool('sgs_morning_alarm_enabled', _morningAlarmEnabled);
++      await prefs.setBool('sgs_end_shift_alarm_enabled', _endShiftAlarmEnabled);
++      await prefs.setBool('sgs_notifications_enabled', _notificationsEnabled);
++    } catch (e) {
++      debugPrint('Error saving settings to local storage: $e');
++    }
++  }
+ 
+-    // 4. Initialize Attendance Records for Today
+-    for (var worker in _workers) {
+-      // Find assignments for this worker
+-      var workerAssigns = _assignments.where((a) => a.workerId == worker.id && isSameDay(a.date, today)).toList();
+-      
+-      List<VisitRecord> visits = [];
+-      for (var wa in workerAssigns) {
+-        visits.add(VisitRecord(
+-          siteId: wa.siteId,
+-          status: 'Pending',
+-          checklistAtVisit: wa.checklist.map((c) => c.copy()).toList(),
+-        ));
+-      }
++  Future<void> _loadGeofencesFromStorage() async {
++    try {
++      final prefs = await SharedPreferences.getInstance();
++      final jsonStr = prefs.getString('sgs_field_tracker_geofences');
++      if (jsonStr != null && jsonStr.isNotEmpty) {
++        final List<dynamic> list = jsonDecode(jsonStr);
++        _backendGeofences = list.map((e) => AppGeofence.fromJson(e as Map<String, dynamic>)).toList();
++        
++        final List<Site> loadedSites = [];
++        for (final fence in _backendGeofences) {
++          final siteId = fence.siteId ?? fence.id;
++          final double lat = fence.center?.latitude ??
++              (fence.polygon != null && fence.polygon!.isNotEmpty
++                  ? (fence.polygon!.map((p) => p.latitude).reduce((a, b) => a + b) / fence.polygon!.length)
++                  : 25.1234);
++          final double lng = fence.center?.longitude ??
++              (fence.polygon != null && fence.polygon!.isNotEmpty
++                  ? (fence.polygon!.map((p) => p.longitude).reduce((a, b) => a + b) / fence.polygon!.length)
++                  : 55.3456);
++          final double radius = fence.radiusM ?? 100.0;
++          
++          final cat = JobCategory.values.firstWhere(
++            (e) => e.name == fence.category || e.toString().split('.').last == fence.category,
++            orElse: () => JobCategory.AMC,
++          );
++          final subCat = SubCategory.values.firstWhere(
++            (e) => e.name == fence.subCategory || e.toString().split('.').last == fence.subCategory,
++            orElse: () => SubCategory.Outdoor,
++          );
++          final jobT = JobType.values.firstWhere(
++            (e) => e.name == fence.jobType || e.toString().split('.').last == fence.jobType,
++            orElse: () => JobType.Permanent,
++          );
++          final freq = JobFrequency.values.firstWhere(
++            (e) => e.name == fence.frequency || e.toString().split('.').last == fence.frequency,
++            orElse: () => JobFrequency.Daily,
++          );
+ 
+-      _attendanceRecords.add(AttendanceRecord(
+-        id: 'att_${worker.id}_${DateFormat('yyyyMMdd').format(today)}',
+-        workerId: worker.id,
+-        date: today,
+-        visits: visits,
+-        status: visits.isEmpty ? 'Present' : 'Absent', // default absent if has visits
+-      ));
++          loadedSites.add(Site(
++            id: siteId,
++            name: fence.name,
++            code: fence.code.isNotEmpty ? fence.code : fence.name.substring(0, min(5, fence.name.length)).toUpperCase(),
++            category: cat,
++            subCategory: subCat,
++            jobType: jobT,
++            frequency: freq,
++            address: fence.address,
++            latitude: lat,
++            longitude: lng,
++            radius: radius,
++            plannedStartTime: fence.plannedStartTime.isNotEmpty ? fence.plannedStartTime : '08:00 AM',
++            plannedEndTime: fence.plannedEndTime.isNotEmpty ? fence.plannedEndTime : '05:00 PM',
++            isAccommodation: fence.isAccommodation,
++          ));
++        }
++        
++        _sites = loadedSites;
++        debugPrint('[TrackerState] Loaded ${_sites.length} sites from local storage');
++      }
++    } catch (e) {
++      debugPrint('Error loading geofences from local storage: $e');
+     }
+   }
+ 
+-  // Setters & Actions
+-  void setActiveRole(String roleId) {
+-    _activeRoleId = roleId;
+-    notifyListeners();
++  Future<void> _saveGeofencesToStorage() async {
++    try {
++      final prefs = await SharedPreferences.getInstance();
++      final jsonStr = jsonEncode(_backendGeofences.map((g) => g.toJson()).toList());
++      await prefs.setString('sgs_field_tracker_geofences', jsonStr);
++      debugPrint('[TrackerState] Saved ${_backendGeofences.length} geofences to local storage');
++    } catch (e) {
++      debugPrint('Error saving geofences to local storage: $e');
++    }
+   }
+ 
+-  void setSelectedWorker(String workerId) {
+-    _closeWorkerWs();
+-    _stopGpsTracking();
++  Future<void> _saveAssignmentsToStorage() async {
++    try {
++      final prefs = await SharedPreferences.getInstance();
++      final jsonStr = jsonEncode(_assignments.map((a) => a.toJson()).toList());
++      await prefs.setString('sgs_field_tracker_assignments', jsonStr);
++      debugPrint('[TrackerState] Saved ${_assignments.length} assignments to local storage');
++    } catch (e) {
++      debugPrint('Error saving assignments to local storage: $e');
++    }
++  }
+ 
+-    _selectedWorkerId = workerId;
++  Future<void> _loadAssignmentsFromStorage() async {
++    try {
++      final prefs = await SharedPreferences.getInstance();
++      final jsonStr = prefs.getString('sgs_field_tracker_assignments');
++      if (jsonStr != null && jsonStr.isNotEmpty) {
++        final List<dynamic> list = jsonDecode(jsonStr);
++        _assignments = list.map((e) => Assignment.fromJson(e as Map<String, dynamic>)).toList();
++        debugPrint('[TrackerState] Loaded ${_assignments.length} assignments from local storage');
++      } else {
++        _assignments = [];
++      }
++    } catch (e) {
++      debugPrint('Error loading assignments from local storage: $e');
++      _assignments = [];
++    }
++  }
+ 
+-    var att = _getCurrentAttendanceRecord(workerId);
+-    if (att != null && att.shiftStart != null && att.shiftEnd == null) {
+-      _connectWorkerWs();
+-      _startGpsTracking();
++  Future<void> _saveAttendanceRecordsToStorage() async {
++    try {
++      final prefs = await SharedPreferences.getInstance();
++      final jsonStr = jsonEncode(_attendanceRecords.map((r) => r.toJson()).toList());
++      await prefs.setString('sgs_field_tracker_attendance', jsonStr);
++      debugPrint('[TrackerState] Saved ${_attendanceRecords.length} attendance records to local storage');
++    } catch (e) {
++      debugPrint('Error saving attendance records to local storage: $e');
+     }
+-    notifyListeners();
+   }
+ 
+-  void setSelectedDate(DateTime date) {
+-    _selectedDate = date;
+-    notifyListeners();
++  Future<void> _loadAttendanceRecordsFromStorage() async {
++    try {
++      final prefs = await SharedPreferences.getInstance();
++      final jsonStr = prefs.getString('sgs_field_tracker_attendance');
++      if (jsonStr != null && jsonStr.isNotEmpty) {
++        final List<dynamic> list = jsonDecode(jsonStr);
++        _attendanceRecords = list.map((e) => AttendanceRecord.fromJson(e as Map<String, dynamic>)).toList();
++        debugPrint('[TrackerState] Loaded ${_attendanceRecords.length} attendance records from local storage');
++      } else {
++        _attendanceRecords = [];
++      }
++    } catch (e) {
++      debugPrint('Error loading attendance records from local storage: $e');
++      _attendanceRecords = [];
++    }
+   }
+ 
+-  void updateShiftSettings({
+-    required String shiftStart,
+-    required int shiftHours,
+-    required int breakMinutes,
+-    required int graceMinutes,
+-    required String lateMark,
+-  }) {
+-    _companyShiftStart = shiftStart;
+-    _companyShiftHours = shiftHours;
+-    _companyBreakMinutes = breakMinutes;
+-    _gracePeriodMinutes = graceMinutes;
+-    _lateMarkTime = lateMark;
+-    notifyListeners();
++  Future<void> _saveTamperAlertsToStorage() async {
++    try {
++      final prefs = await SharedPreferences.getInstance();
++      final jsonStr = jsonEncode(_tamperAlerts.map((a) => a.toJson()).toList());
++      await prefs.setString('sgs_field_tracker_tamper_alerts', jsonStr);
++      debugPrint('[TrackerState] Saved ${_tamperAlerts.length} tamper alerts to local storage');
++    } catch (e) {
++      debugPrint('Error saving tamper alerts to local storage: $e');
++    }
+   }
+ 
+-  // Device configuration settings
+-  void toggleGps(bool enabled) {
+-    _isGpsEnabled = enabled;
+-    if (!enabled) {
+-      triggerTamperAlert(currentWorker.id, 'GPS Disabled During Shift', 'Worker disabled GPS location services.');
+-      _stopGpsTracking();
+-    } else {
+-      final att = _getCurrentAttendanceRecord(currentWorker.id);
+-      if (att != null && att.shiftStart != null && att.shiftEnd == null) {
+-        _startGpsTracking();
++  Future<void> _loadTamperAlertsFromStorage() async {
++    try {
++      final prefs = await SharedPreferences.getInstance();
++      final jsonStr = prefs.getString('sgs_field_tracker_tamper_alerts');
++      if (jsonStr != null && jsonStr.isNotEmpty) {
++        final List<dynamic> list = jsonDecode(jsonStr);
++        _tamperAlerts = list.map((e) => TamperAlert.fromJson(e as Map<String, dynamic>)).toList();
++        debugPrint('[TrackerState] Loaded ${_tamperAlerts.length} tamper alerts from local storage');
++      } else {
++        _tamperAlerts = [];
+       }
++    } catch (e) {
++      debugPrint('Error loading tamper alerts from local storage: $e');
++      _tamperAlerts = [];
+     }
+-    notifyListeners();
+   }
+ 
+-  void toggleFakeGps(bool enabled) {
+-    _isFakeGpsEnabled = enabled;
+-    if (enabled) {
+-      triggerTamperAlert(currentWorker.id, 'Fake Location', 'Mock location coordinates detected on the device.');
++  Future<void> _saveNotificationsToStorage() async {
++    try {
++      final prefs = await SharedPreferences.getInstance();
++      final jsonStr = jsonEncode(_notifications.map((n) => n.toJson()).toList());
++      await prefs.setString('sgs_field_tracker_notifications', jsonStr);
++    } catch (e) {
++      debugPrint('Error saving notifications to local storage: $e');
+     }
+-    notifyListeners();
+   }
+ 
+-  void toggleInternet(bool enabled) {
+-    _isInternetEnabled = enabled;
+-    if (!enabled) {
+-      triggerTamperAlert(currentWorker.id, 'Internet Off', 'Worker disconnected from internet.');
+-      _closeWorkerWs();
+-    } else {
+-      // Re-connected! Sync offline queues
+-      _syncOfflineQueue();
+-      final att = _getCurrentAttendanceRecord(currentWorker.id);
+-      if (att != null && att.shiftStart != null && att.shiftEnd == null) {
+-        _connectWorkerWs();
++  Future<void> _loadNotificationsFromStorage() async {
++    try {
++      final prefs = await SharedPreferences.getInstance();
++      final jsonStr = prefs.getString('sgs_field_tracker_notifications');
++      if (jsonStr != null && jsonStr.isNotEmpty) {
++        final List<dynamic> list = jsonDecode(jsonStr);
++        _notifications = list.map((e) => AppNotification.fromJson(e as Map<String, dynamic>)).toList();
++      } else {
++        _notifications = [];
+       }
++    } catch (e) {
++      debugPrint('Error loading notifications from local storage: $e');
++      _notifications = [];
+     }
++  }
++
++  void addNotification({
++    required String title,
++    required String message,
++    required String targetRole,
++    String? targetWorkerId,
++  }) {
++    final notification = AppNotification(
++      id: 'notif_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(1000)}',
++      title: title,
++      message: message,
++      targetRole: targetRole,
++      targetWorkerId: targetWorkerId,
++      timestamp: _simulatedTime,
++    );
++    _notifications.add(notification);
++    _saveNotificationsToStorage();
+     notifyListeners();
+   }
+ 
+-  void triggerAlarm(bool value) {
+-    _morningAlarmTriggered = value;
+-    if (value) {
+-      // Alarm forces GPS on
+-      _isGpsEnabled = true;
++  void markNotificationAsRead(String id) {
++    int index = _notifications.indexWhere((n) => n.id == id);
++    if (index != -1) {
++      _notifications[index].isRead = true;
++      _saveNotificationsToStorage();
++      notifyListeners();
+     }
++  }
++
++  void clearAllNotifications() {
++    _notifications.clear();
++    _saveNotificationsToStorage();
+     notifyListeners();
+   }
+ 
+-  // Simulated Time Progression
+-  void setSimulatedTime(DateTime time) {
+-    _simulatedTime = time;
+-    
+-    // Check if alarm should be triggered
+-    // Morning alarm triggers 30 mins before accommodation departure (planned exit from ACC-001 is 08:30 AM in initial setup, so alarm at 08:00 AM)
+-    if (_simulatedTime.hour == 8 && _simulatedTime.minute == 0 && !_morningAlarmTriggered) {
+-      _morningAlarmTriggered = true;
++  void triggerBannerNotification(String message) {
++    if (!_notificationsEnabled) return;
++    _activeNotificationBanner = message;
++    notifyListeners();
++
++    Timer(const Duration(seconds: 5), () {
++      _activeNotificationBanner = null;
++      notifyListeners();
++    });
++  }
++
++  void _seedInitialData() {
++    // If not loaded from local storage, start empty. Otherwise keep loaded data.
++    if (_sites.isEmpty) {
++      _sites = [];
+     }
+-    
+-    // Automatically generate background Heartbeat logs every 30 mins if shift is active
+-    var att = _getCurrentAttendanceRecord(currentWorker.id);
+-    if (att != null && att.shiftStart != null && att.shiftEnd == null) {
+-      if (_simulatedTime.minute == 0 || _simulatedTime.minute == 30) {
+-        logHeartbeat(currentWorker.id, 25.2048, 55.2708);
++    if (_assignments.isEmpty) {
++      _assignments = [];
++    }
++
++    DateTime today = DateTime(2026, 6, 17);
++
++    // Seed a demo worker if none exist yet (first launch)
++    if (_workers.isEmpty) {
++      final demoWorker = Worker(
++        id: 'worker_demo',
++        employeeId: 'EMP001',
++        name: 'John Demo',
++        phone: '+971501234567',
++        staffType: StaffType.IP,
++        staffCategory: StaffCategory.Direct,
++        leaveCategory: LeaveCategory.Year1,
++        department: 'Landscaping',
++        designation: 'Field Worker',
++        username: 'john',
++        password: 'password123',
++        staffHierarchy: 'Worker',
++        isActive: true,
++        emiratesId: 'UAE-0000-0000',
++        emiratesIdExpiry: DateTime(2027, 1, 1),
++        passportNo: 'P0000000',
++        passportExpiry: DateTime(2027, 1, 1),
++        labourCardNo: 'LC000000',
++        labourCardExpiry: DateTime(2027, 1, 1),
++        joinedDate: DateTime(2024, 1, 1),
++        leaveDueDate: DateTime(2025, 1, 1),
++      );
++      _workers = [demoWorker];
++      _selectedWorkerId = demoWorker.id;
++      _saveWorkersToStorage(); // persist demo worker
++    }
++
++    // Initialize Attendance Records for Today
++    bool attendanceRecordsChanged = false;
++    for (var worker in _workers) {
++      bool exists = _attendanceRecords.any((r) => r.workerId == worker.id && isSameDay(r.date, today));
++      if (!exists) {
++        var workerAssigns = _assignments.where((a) => a.workerId == worker.id && isSameDay(a.date, today)).toList();
++
++        List<VisitRecord> visits = [];
++        for (var wa in workerAssigns) {
++          visits.add(VisitRecord(
++            siteId: wa.siteId,
++            status: 'Pending',
++            checklistAtVisit: wa.checklist.map((c) => c.copy()..isCompleted = false).toList(),
++          ));
++        }
++
++        _attendanceRecords.add(AttendanceRecord(
++          id: 'att_${worker.id}_${DateFormat('yyyyMMdd').format(today)}',
++          workerId: worker.id,
++          date: today,
++          visits: visits,
++          status: visits.isEmpty ? 'Present' : 'Pending',
++        ));
++        attendanceRecordsChanged = true;
+       }
+     }
++    if (attendanceRecordsChanged) _saveAttendanceRecordsToStorage();
++  }
++
++  // Setters & Actions
++  void setActiveRole(String roleId) {
++    _activeRoleId = roleId;
++    notifyListeners();
++  }
+ 
++  void setSelectedDate(DateTime date) {
++    _selectedDate = date;
++    _seedInitialData(); // ensure attendance records exist for the new date
+     notifyListeners();
+   }
+ 
+@@ -342,6 +577,8 @@ class TrackerState extends ChangeNotifier {
+ 
+   // Business Logic - Shift Operations
+   void startShift(String workerId) {
++    _morningAlarmTriggered = false;
++    _endShiftAlarmTriggered = false;
+     var att = _getOrCreateAttendanceRecord(workerId, _simulatedTime);
+     if (att.shiftStart == null) {
+       att.shiftStart = _simulatedTime;
+@@ -354,6 +591,7 @@ class TrackerState extends ChangeNotifier {
+   }
+ 
+   void endShift(String workerId) {
++    _endShiftAlarmTriggered = false;
+     var att = _getCurrentAttendanceRecord(workerId);
+     if (att != null && att.shiftStart != null && att.shiftEnd == null) {
+       att.shiftEnd = _simulatedTime;
+@@ -388,7 +626,7 @@ class TrackerState extends ChangeNotifier {
+   // Site Management CRUD
+   void addSite(Site site) {
+     _sites.add(site);
+-    
++    _saveGeofencesToStorage();
+     // Update active attendance records to include new site if they have assignments
+     notifyListeners();
+   }
+@@ -397,6 +635,7 @@ class TrackerState extends ChangeNotifier {
+     int index = _sites.indexWhere((s) => s.id == updatedSite.id);
+     if (index != -1) {
+       _sites[index] = updatedSite;
++      _saveGeofencesToStorage();
+       notifyListeners();
+     }
+   }
+@@ -408,12 +647,13 @@ class TrackerState extends ChangeNotifier {
+       final geofenceToPost = updatedGeofence.copyWith(id: fenceId);
+       try {
+         final res = await http.put(
+-          Uri.parse('http://localhost:8080/api/geofences/$fenceId'),
++          Uri.parse('$kServerBaseUrl/api/geofences/$fenceId'),
+           headers: {'Content-Type': 'application/json'},
+           body: jsonEncode(geofenceToPost.toJson()),
+-        );
++        ).timeout(const Duration(seconds: 2));
+         if (res.statusCode == 200) {
+           _backendGeofences[idx] = geofenceToPost;
++          _saveGeofencesToStorage();
+         }
+       } catch (e) {
+         debugPrint('[TrackerState] Edit site error: $e');
+@@ -423,6 +663,7 @@ class TrackerState extends ChangeNotifier {
+     int index = _sites.indexWhere((s) => s.id == updatedSite.id);
+     if (index != -1) {
+       _sites[index] = updatedSite;
++      _saveGeofencesToStorage();
+       notifyListeners();
+     }
+   }
+@@ -432,9 +673,10 @@ class TrackerState extends ChangeNotifier {
+     if (idx != -1) {
+       final fenceId = _backendGeofences[idx].id;
+       try {
+-        final res = await http.delete(Uri.parse('http://localhost:8080/api/geofences/$fenceId'));
++        final res = await http.delete(Uri.parse('$kServerBaseUrl/api/geofences/$fenceId')).timeout(const Duration(seconds: 2));
+         if (res.statusCode == 200) {
+           _backendGeofences.removeAt(idx);
++          _saveGeofencesToStorage();
+         }
+       } catch (e) {
+         debugPrint('[TrackerState] Delete site error: $e');
+@@ -442,6 +684,7 @@ class TrackerState extends ChangeNotifier {
+     }
+     
+     _sites.removeWhere((s) => s.id == siteId);
++    _saveGeofencesToStorage();
+     notifyListeners();
+   }
+ 
+@@ -460,6 +703,7 @@ class TrackerState extends ChangeNotifier {
+       visits: [],
+       status: 'Present', // present if no assigned sites
+     ));
++    _saveAttendanceRecordsToStorage();
+     notifyListeners();
+   }
+ 
+@@ -528,17 +772,17 @@ class TrackerState extends ChangeNotifier {
+       att.visits.add(VisitRecord(
+         siteId: siteId,
+         status: 'Pending',
+-        checklistAtVisit: checklist.map((c) => c.copy()).toList(),
++        checklistAtVisit: checklist.map((c) => c.copy()..isCompleted = false).toList(),
+       ));
+     } else {
+       // update checklist
+       att.visits[visitIndex] = VisitRecord(
+         siteId: siteId,
+         status: att.visits[visitIndex].status,
+-        checklistAtVisit: checklist.map((c) => c.copy()).toList(),
++        checklistAtVisit: checklist.map((c) => c.copy()..isCompleted = false).toList(),
+         entryTime: att.visits[visitIndex].entryTime,
+         exitTime: att.visits[visitIndex].exitTime,
+-        photoPath: att.visits[visitIndex].photoPath,
++        photoPaths: att.visits[visitIndex].photoPaths,
+         comments: att.visits[visitIndex].comments,
+       );
+     }
+@@ -559,7 +803,29 @@ class TrackerState extends ChangeNotifier {
+         att.visits.removeWhere((v) => v.siteId == assign.siteId);
+         _recalculateAttendanceStatus(att);
+       }
+-      notifyListeners();
++    _sendHeartbeatToBackend(lat, lng, 10.0);
++    
++    notifyListeners();
++  }
++      var assign = _assignments[assignIndex];
++      _assignments.removeAt(assignIndex);
++
++      // Remove visit from attendance record
++      var att = _getCurrentAttendanceRecord(assign.workerId);
++      if (att != null) {
++        att.visits.removeWhere((v) => v.siteId == assign.siteId);
++        _recalculateAttendanceStatus(att);
++      }
++      _saveAssignmentsToStorage();
++      _saveAttendanceRecordsToStorage();
++
++      final site = _sites.firstWhere((s) => s.id == assign.siteId, orElse: () => _sites.first);
++      addNotification(
++        title: 'Schedule Removed',
++        message: 'Assignment for "${site.name}" (${site.code}) on ${DateFormat('dd-MMM').format(assign.date)} has been removed.',
++        targetRole: 'Worker',
++        targetWorkerId: assign.workerId,
++      );
+     }
+   }
+ 
+@@ -574,12 +840,12 @@ class TrackerState extends ChangeNotifier {
+     }
+   }
+ 
+-  void submitVisitDetails(String workerId, String siteId, {String? comments, String? photoPath}) {
++  void submitVisitDetails(String workerId, String siteId, {String? comments, List<String>? photoPaths}) {
+     var att = _getCurrentAttendanceRecord(workerId);
+     if (att != null) {
+       var visit = att.visits.firstWhere((v) => v.siteId == siteId);
+       visit.comments = comments;
+-      visit.photoPath = photoPath;
++      visit.photoPaths = photoPaths ?? const [];
+       notifyListeners();
+     }
+   }
+@@ -715,44 +981,6 @@ class TrackerState extends ChangeNotifier {
+       _currentAccuracy = 10.0;
+       _sendHeartbeatToBackend(_currentLat, _currentLng, _currentAccuracy);
+ 
+-      _recalculateAttendanceStatus(att);
+-      notifyListeners();
+-    }
+-  }
+-
+-  // Pending Visit Override (Supervisor / Engineer actions)
+-  void resolvePendingVisit(String recordId, String siteId, String action, {String? explanation}) {
+-    // Action can be: 'present' (mark complete), 'ignore' (remove visit from attendance score), 'completed'
+-    int recordIndex = _attendanceRecords.indexWhere((r) => r.id == recordId);
+-    if (recordIndex != -1) {
+-      var record = _attendanceRecords[recordIndex];
+-      int visitIndex = record.visits.indexWhere((v) => v.siteId == siteId);
+-      if (visitIndex != -1) {
+-        var visit = record.visits[visitIndex];
+-        if (action == 'present' || action == 'completed') {
+-          visit.status = 'Completed';
+-          visit.entryTime ??= DateTime(record.date.year, record.date.month, record.date.day, 9, 0);
+-          visit.exitTime ??= DateTime(record.date.year, record.date.month, record.date.day, 10, 0);
+-          visit.comments = explanation ?? "Resolved by Supervisor";
+-        } else if (action == 'ignore') {
+-          visit.status = 'Skipped';
+-          visit.comments = explanation ?? "Ignored by Supervisor";
+-        }
+-        _recalculateAttendanceStatus(record);
+-        notifyListeners();
+-      }
+-    }
+-  }
+-
+-  // Heartbeat Logs & GPS Alerts
+-  void logHeartbeat(String workerId, double lat, double lng) {
+-    var log = HeartbeatLog(
+-      id: 'hb_${DateTime.now().millisecondsSinceEpoch}',
+-      workerId: workerId,
+-      timestamp: _simulatedTime,
+-      latitude: lat,
+-      longitude: lng,
+-    );
+ 
+     if (_isInternetEnabled) {
+       _heartbeatLogs.add(log);
+@@ -783,246 +1011,61 @@ class TrackerState extends ChangeNotifier {
+     notifyListeners();
+   }
+ 
+-  // ΓöÇΓöÇ Worker WebSocket & Geolocator Tracking Client ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++  // ├óΓÇ¥Γé¼├óΓÇ¥Γé¼ Worker WebSocket & Geolocator Tracking Client ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼
+ 
+   void _connectWorkerWs() {
+     _closeWorkerWs();
+     _workerReconnectTimer?.cancel();
++            longitude: lng,
++            radius: radius,
++            plannedStartTime: fence.plannedStartTime.isNotEmpty ? fence.plannedStartTime : '08:00 AM',
++            plannedEndTime: fence.plannedEndTime.isNotEmpty ? fence.plannedEndTime : '05:00 PM',
+ 
+-    if (!_isInternetEnabled) return;
++      if (_notificationsEnabled) {
++        _activeNotificationBanner = isCamp ? "Returned to accommodation camp" : "Destination Reached: Entered $name";
++        notifyListeners();
+ 
+-    final worker = currentWorker;
+-    // Replace localhost with network IP when debugging on actual phones
+-    final wsUrl = 'ws://localhost:8080/ws?role=worker&workerId=${worker.id}&workerName=${Uri.encodeComponent(worker.name)}';
++        Timer(const Duration(seconds: 4), () {
++          _activeNotificationBanner = null;
++          notifyListeners();
++        });
++      }
+ 
+-    try {
+-      _workerWsChannel = WebSocketChannel.connect(Uri.parse(wsUrl));
+-      _isWorkerWsConnected = true;
+-      _workerReconnectDelay = 2; // reset
+-      notifyListeners();
++      debugPrint('[Geofence] ENTRY detected for $name ($id)');
++    } else if (!isInside && _insideGeofenceIds.contains(id)) {
++      _insideGeofenceIds.remove(id);
+ 
+-      _workerWsChannel!.stream.listen(
+-        (message) {
+-          debugPrint('[WorkerWS] Message from backend: $message');
+-        },
+-        onError: (err) {
+-          debugPrint('[WorkerWS] Error: $err');
+-          _isWorkerWsConnected = false;
+-          notifyListeners();
+-          _scheduleWorkerReconnect();
+-        },
+-        onDone: () {
+-          debugPrint('[WorkerWS] Closed');
+-          _isWorkerWsConnected = false;
++      simulateExitGeofence(currentWorker.id, id);
++
++      final isCamp = name.toLowerCase().contains('camp') || name.toLowerCase().contains('accommodation');
++      if (_notificationsEnabled) {
++        _activeNotificationBanner = isCamp ? "Departure from Camp" : "You Left Assigned Site: Exited $name";
++        notifyListeners();
++
++        Timer(const Duration(seconds: 4), () {
++          _activeNotificationBanner = null;
+           notifyListeners();
+-          _scheduleWorkerReconnect();
+-        },
+-        cancelOnError: false,
+-      );
+-      debugPrint('[WorkerWS] Connected successfully to $wsUrl');
+-    } catch (e) {
+-      debugPrint('[WorkerWS] Connection failed: $e');
+-      _isWorkerWsConnected = false;
+-      notifyListeners();
+-      _scheduleWorkerReconnect();
+-    }
+-  }
++        });
++      }
+ 
+-  void _closeWorkerWs() {
+-    _workerWsChannel?.sink.close();
+-    _workerWsChannel = null;
+-    _isWorkerWsConnected = false;
++      debugPrint('[Geofence] EXIT detected for $name ($id)');
++    }
+   }
+ 
+-  void _scheduleWorkerReconnect() {
+-    _workerReconnectTimer?.cancel();
+-    if (!_isInternetEnabled) return;
+-    
++  Future<void> _sendHeartbeatToBackend(double lat, double lng, double accuracy) async {
+     final att = _getCurrentAttendanceRecord(currentWorker.id);
+-    if (att == null || att.shiftStart == null || att.shiftEnd != null) return;
+-
+-    _workerReconnectTimer = Timer(Duration(seconds: _workerReconnectDelay), () {
+-      _workerReconnectDelay = (_workerReconnectDelay * 2).clamp(2, 60);
+-      _connectWorkerWs();
+-    });
+-  }
++    final isOnShift = att != null && att.shiftStart != null && att.shiftEnd == null;
+ 
+-  Future<void> _startGpsTracking() async {
+-    _stopGpsTracking();
+-
+-    if (!_isGpsEnabled) return;
+-
+-    try {
+-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+-      if (!serviceEnabled) {
+-        debugPrint('[GPS] Location services disabled.');
+-        return;
+-      }
+-
+-      LocationPermission permission = await Geolocator.checkPermission();
+-      if (permission == LocationPermission.denied) {
+-        permission = await Geolocator.requestPermission();
+-        if (permission == LocationPermission.denied) {
+-          debugPrint('[GPS] Permission denied.');
+-          return;
+-        }
+-      }
+-
+-      if (permission == LocationPermission.deniedForever) {
+-        debugPrint('[GPS] Permission permanently denied.');
+-        return;
+-      }
+-
+-      _gpsSubscription = Geolocator.getPositionStream(
+-        locationSettings: const LocationSettings(
+-          accuracy: LocationAccuracy.high,
+-          distanceFilter: 5,
+-        ),
+-      ).listen((pos) {
+-        if (_isFakeGpsEnabled) return; // ignore real movements when fake location spoof is on
+-        _updateLocation(pos.latitude, pos.longitude, pos.accuracy);
+-      }, onError: (err) {
+-        debugPrint('[GPS] Stream error: $err');
+-      });
+-      debugPrint('[GPS] Geolocator listening to updates.');
+-    } catch (e) {
+-      debugPrint('[GPS] Failed to start tracking: $e');
+-    }
+-  }
+-
+-  void _stopGpsTracking() {
+-    _gpsSubscription?.cancel();
+-    _gpsSubscription = null;
+-  }
+-
+-  void _updateLocation(double lat, double lng, double accuracy) {
+-    _currentLat = lat;
+-    _currentLng = lng;
+-    _currentAccuracy = accuracy;
+-
+-    // Check geofence entry/exit boundary crossings
+-    _checkGeofenceTransitions(lat, lng);
+-
+-    notifyListeners();
+-
+-    // Create a local heartbeat log representation
+-    var log = HeartbeatLog(
+-      id: 'hb_${DateTime.now().millisecondsSinceEpoch}',
+-      workerId: currentWorker.id,
+-      timestamp: _simulatedTime,
+-      latitude: lat,
+-      longitude: lng,
+-    );
+-    if (_isInternetEnabled) {
+-      _heartbeatLogs.add(log);
+-    } else {
+-      _offlineHeartbeats.add(log);
+-    }
+-
+-    _sendHeartbeatToBackend(lat, lng, accuracy);
+-  }
+-
+-  bool isPointInPolygon(LatLng point, List<LatLng> polygon) {
+-    int i, j = polygon.length - 1;
+-    bool oddNodes = false;
+-    double x = point.longitude;
+-    double y = point.latitude;
+-
+-    for (i = 0; i < polygon.length; i++) {
+-      if ((polygon[i].latitude < y && polygon[j].latitude >= y ||
+-              polygon[j].latitude < y && polygon[i].latitude >= y) &&
+-          (polygon[i].longitude +
+-                  (y - polygon[i].latitude) /
+-                      (polygon[j].latitude - polygon[i].latitude) *
+-                      (polygon[j].longitude - polygon[i].longitude) <
+-              x)) {
+-        oddNodes = !oddNodes;
+-      }
+-      j = i;
+-    }
+-
+-    return oddNodes;
+-  }
+-
+-  void _checkGeofenceTransitions(double lat, double lng) {
+-    final myPos = LatLng(lat, lng);
+-
+-    // 1. Check static mock sites
+-    for (final site in _sites) {
+-      final double dist = Geolocator.distanceBetween(lat, lng, site.latitude, site.longitude);
+-      final bool isInside = dist <= site.radius;
+-
+-      _evaluateGeofenceTransition(site.id, site.name, isInside);
+-    }
+-
+-    // 2. Check dynamic PostgreSQL geofences
+-    for (final fence in _backendGeofences) {
+-      bool isInside = false;
+-      if (fence.type == GeofenceShape.circle && fence.center != null && fence.radiusM != null) {
+-        final double dist = Geolocator.distanceBetween(
+-          lat, lng, fence.center!.latitude, fence.center!.longitude,
+-        );
+-        isInside = dist <= fence.radiusM!;
+-      } else if (fence.type == GeofenceShape.polygon && fence.polygon != null) {
+-        isInside = isPointInPolygon(myPos, fence.polygon!);
+-      }
+-
+-      _evaluateGeofenceTransition(fence.id, fence.name, isInside);
+-    }
+-  }
+-
+-  void _evaluateGeofenceTransition(String id, String name, bool isInside) {
+-    if (isInside && !_insideGeofenceIds.contains(id)) {
+-      _insideGeofenceIds.add(id);
+-
+-      final isCamp = name.toLowerCase().contains('camp') || name.toLowerCase().contains('accommodation');
+-      if (!isCamp) {
+-        startShift(currentWorker.id);
+-      }
+-
+-      simulateEnterGeofence(currentWorker.id, id);
+-
+-      _activeNotificationBanner = isCamp ? "Returned to accommodation camp" : "Destination Reached: Entered $name";
+-      notifyListeners();
+-
+-      Timer(const Duration(seconds: 4), () {
+-        _activeNotificationBanner = null;
+-        notifyListeners();
+-      });
+-
+-      debugPrint('[Geofence] ENTRY detected for $name ($id)');
+-    } else if (!isInside && _insideGeofenceIds.contains(id)) {
+-      _insideGeofenceIds.remove(id);
+-
+-      simulateExitGeofence(currentWorker.id, id);
+-
+-      final isCamp = name.toLowerCase().contains('camp') || name.toLowerCase().contains('accommodation');
+-      _activeNotificationBanner = isCamp ? "Departure from Camp" : "You Left Assigned Site: Exited $name";
+-      notifyListeners();
+-
+-      Timer(const Duration(seconds: 4), () {
+-        _activeNotificationBanner = null;
+-        notifyListeners();
+-      });
+-
+-      debugPrint('[Geofence] EXIT detected for $name ($id)');
+-    }
+-  }
+-
+-  Future<void> _sendHeartbeatToBackend(double lat, double lng, double accuracy) async {
+-    final att = _getCurrentAttendanceRecord(currentWorker.id);
+-    final isOnShift = att != null && att.shiftStart != null && att.shiftEnd == null;
+-
+-    final payload = {
+-      "type": "location",
+-      "workerId": currentWorker.id,
+-      "workerName": currentWorker.name,
+-      "lat": lat,
+-      "lng": lng,
+-      "accuracy": accuracy,
+-      "isOnShift": isOnShift,
+-      "timestamp": _simulatedTime.toUtc().toIso8601String(),
+-    };
++    final payload = {
++      "type": "location",
++      "workerId": currentWorker.id,
++      "workerName": currentWorker.name,
++      "lat": lat,
++      "lng": lng,
++      "accuracy": accuracy,
++      "isOnShift": isOnShift,
++      "timestamp": _simulatedTime.toUtc().toIso8601String(),
++    };
+ 
+     if (_isInternetEnabled && _isWorkerWsConnected && _workerWsChannel != null) {
+       try {
+@@ -1050,7 +1093,7 @@ class TrackerState extends ChangeNotifier {
+     debugPrint('[Offline] Queued update (${_offlineLocationsBuffer.length} buffered)');
+   }
+ 
+-  // ΓöÇΓöÇ Offline Sync ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
++  // ├óΓÇ¥Γé¼├óΓÇ¥Γé¼ Offline Sync ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼
+ 
+   Future<void> _syncOfflineQueue() async {
+     if (_offlineVisits.isNotEmpty) {
+@@ -1086,10 +1129,10 @@ class TrackerState extends ChangeNotifier {
+       for (final item in items) {
+         try {
+           final res = await http.post(
+-            Uri.parse('http://localhost:8080/api/heartbeat'),
++            Uri.parse('$kServerBaseUrl/api/heartbeat'),
+             headers: {'Content-Type': 'application/json'},
+             body: jsonEncode(item),
+-          );
++          ).timeout(const Duration(seconds: 2));
+           if (res.statusCode != 200) {
+             _offlineLocationsBuffer.add(item);
+           } else {
+@@ -1107,7 +1150,7 @@ class TrackerState extends ChangeNotifier {
+ 
+   Future<void> fetchGeofencesFromBackend() async {
+     try {
+-      final res = await http.get(Uri.parse('http://localhost:8080/api/geofences'));
++      final res = await http.get(Uri.parse('$kServerBaseUrl/api/geofences')).timeout(const Duration(seconds: 2));
+       if (res.statusCode == 200) {
+         final list = jsonDecode(res.body) as List<dynamic>;
+         _backendGeofences.clear();
+@@ -1166,7 +1209,7 @@ class TrackerState extends ChangeNotifier {
+         if (newSites.isNotEmpty) {
+           _sites = newSites;
+         }
+-
++        _saveGeofencesToStorage();
+         notifyListeners();
+       }
+     } catch (e) {
+@@ -1233,7 +1276,7 @@ class TrackerState extends ChangeNotifier {
+             .map((a) => VisitRecord(
+                   siteId: a.siteId,
+                   status: 'Pending',
+-                  checklistAtVisit: a.checklist.map((c) => c.copy()).toList(),
++                  checklistAtVisit: a.checklist.map((c) => c.copy()..isCompleted = false).toList(),
+                 ))
+             .toList(),
+       );
+@@ -1246,6 +1289,7 @@ class TrackerState extends ChangeNotifier {
+     // Accommodation exits/entries don't count towards work attendance completions.
+     // Exclude accommodation geofence from calculations
+     var workVisits = record.visits.where((v) {
++      if (_sites.isEmpty) return true;
+       var s = _sites.firstWhere((site) => site.id == v.siteId, orElse: () => _sites.first);
+       return !s.isAccommodation;
+     }).toList();
+@@ -1279,6 +1323,50 @@ class TrackerState extends ChangeNotifier {
+     return d1.year == d2.year && d1.month == d2.month && d1.day == d2.day;
+   }
+ 
++  /// Selects the worker being viewed in the Admin's worker detail view.
++  void setSelectedWorker(String workerId) {
++    _selectedWorkerId = workerId;
++    notifyListeners();
++  }
++
++  /// Programmatically triggers or dismisses the end-of-shift alarm overlay
++  /// on the Worker screen.
++  void triggerEndShiftAlarm(bool value) {
++    _endShiftAlarmTriggered = value;
++    notifyListeners();
++  }
++
++  /// Admin resolves a pending/disputed site visit: either approves or rejects it.
++  /// [action] should be 'Approve' or 'Reject'.
++  void resolvePendingVisit(
++    String attendanceRecordId,
++    String siteId,
++    String action, {
++    String? explanation,
++  }) {
++    final recIdx = _attendanceRecords.indexWhere((r) => r.id == attendanceRecordId);
++    if (recIdx == -1) return;
++
++    final record = _attendanceRecords[recIdx];
++    final visitIdx = record.visits.indexWhere((v) => v.siteId == siteId);
++    if (visitIdx == -1) return;
++
++    final visit = record.visits[visitIdx];
++    final newStatus = action == 'Approve' ? 'Approved' : 'Rejected';
++    record.visits[visitIdx] = VisitRecord(
++      siteId: visit.siteId,
++      status: newStatus,
++      entryTime: visit.entryTime,
++      exitTime: visit.exitTime,
++      checklistAtVisit: visit.checklistAtVisit,
++      comments: visit.comments ?? explanation,
++      photoPaths: visit.photoPaths,
++    );
++
++    _saveAttendanceRecordsToStorage();
++    notifyListeners();
++  }
++
+   @override
+   void dispose() {
+     _geofencePollTimer?.cancel();
+@@ -1288,3 +1376,236 @@ class TrackerState extends ChangeNotifier {
+     super.dispose();
+   }
+ }
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++

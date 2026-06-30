@@ -192,7 +192,7 @@ class _MainNavigationControllerState extends State<MainNavigationController> {
                       ),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(32),
-                        child: const WorkerView(),
+                        child: WorkerView(onLogout: () {}),
                       ),
                     ),
                   ),
@@ -209,34 +209,15 @@ class _MainNavigationControllerState extends State<MainNavigationController> {
 
     // Standard Login Routing: Full screen layout according to Role
     if (state.activeRoleId == 'Worker') {
-      // Worker App Fullscreen with a tiny logout overlay at the top left
       return Scaffold(
-        body: Stack(
-          children: [
-            const WorkerView(),
-            Positioned(
-              top: 42,
-              right: 16,
-              child: SafeArea(
-                child: CircleAvatar(
-                  radius: 18,
-                  backgroundColor: Colors.black.withOpacity(0.6),
-                  child: IconButton(
-                    icon: const Icon(Icons.logout, color: Colors.tealAccent, size: 16),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                    onPressed: () async {
-                      final prefs = await SharedPreferences.getInstance();
-                      await prefs.setBool('sgs_is_logged_in', false);
-                      setState(() {
-                        _initFuture = Future.value(InitialData(false, 'Admin', 'worker_1'));
-                      });
-                    },
-                  ),
-                ),
-              ),
-            ),
-          ],
+        body: WorkerView(
+          onLogout: () async {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setBool('sgs_is_logged_in', false);
+            setState(() {
+              _initFuture = Future.value(InitialData(false, 'Admin', 'worker_1'));
+            });
+          },
         ),
       );
     } else {
